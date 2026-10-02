@@ -615,7 +615,7 @@
 
         // ----- Spawnpunkte (gelb markiert) & Bounce Pads (grün) -----
         const SPAWN_PROTECT_MS = 3000;
-        const PAD_POWER = 18;
+        const PAD_POWER = 23;
         const SPAWN_POINTS = [];
         const BOUNCE_PADS = [];
         const decoGroup = new THREE.Group(); // bewusst NICHT in mazeGroup (sonst treffen Schüsse die Deko)
@@ -635,7 +635,7 @@
             decoGroup.add(ring, disc, beam);
         });
 
-        [[12,12],[7,12],[17,12],[12,7],[12,17]].forEach(([r, c]) => {
+        [[12,12],[7,12],[17,12],[12,7],[12,17],[4,3],[4,21],[20,3],[20,21],[10,6],[10,18],[14,6],[14,18],[6,7],[6,17],[18,7],[18,17],[12,9],[12,15],[9,9],[9,15],[15,9],[15,15]].forEach(([r, c]) => {
             if (MAZE_GRID[r][c] !== 0) return;
             const w = cellToWorld(r, c);
             const base = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.9, 0.18, 32), new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.3 }));
@@ -1356,7 +1356,7 @@
                     broadcastData({
                         type: 'HIT',
                         targetId: peerId,
-                        damage: 25,
+                        damage: 10,
                         knockback: knockbackImpulse,
                         attackerName: player.name
                     });
@@ -1390,7 +1390,18 @@
             }
         }
 
-        function checkAABBCollision(posX, posZ, radius) {
+        // Liegen die Füße über der Boxhöhe, kann man über die Boxen laufen
+        function groundAt(posX, posZ, radius) {
+            if (Math.abs(posX) > halfGrid || Math.abs(posZ) > halfGrid) return -Infinity; // außerhalb der Map: kein Boden
+            for (let i = 0; i < wallBoxes.length; i++) {
+                const b = wallBoxes[i];
+                if (posX > b.minX - radius * 0.5 && posX < b.maxX + radius * 0.5 && posZ > b.minZ - radius * 0.5 && posZ < b.maxZ + radius * 0.5) return WALL_HEIGHT;
+            }
+            return 0;
+        }
+
+        function checkAABBCollision(posX, posZ, radius, feetY = 0) {
+            if (feetY >= WALL_HEIGHT - 0.05) return false;
             for (let i = 0; i < wallBoxes.length; i++) {
                 const b = wallBoxes[i];
                 const closestX = Math.max(b.minX, Math.min(posX, b.maxX));
@@ -1461,26 +1472,36 @@
             const dz = (targetVelZ + player.knockbackVel.z) * dt;
 
             const nextX = player.pos.x + dx;
-            if (!checkAABBCollision(nextX, player.pos.z, player.radius)) {
+            if (!checkAABBCollision(nextX, player.pos.z, player.radius, player.pos.y - player.height)) {
                 player.pos.x = nextX;
             } else {
                 player.knockbackVel.x = Math.abs(player.knockbackVel.x) > 6 ? -player.knockbackVel.x * 0.5 : 0; // Abprallen an Wänden
             }
 
             const nextZ = player.pos.z + dz;
-            if (!checkAABBCollision(player.pos.x, nextZ, player.radius)) {
+            if (!checkAABBCollision(player.pos.x, nextZ, player.radius, player.pos.y - player.height)) {
                 player.pos.z = nextZ;
             } else {
                 player.knockbackVel.z = Math.abs(player.knockbackVel.z) > 6 ? -player.knockbackVel.z * 0.5 : 0;
             }
 
+            const prevFeet = player.pos.y - player.height;
             player.pos.y += dy;
-            if (player.pos.y <= player.height) {
-                player.pos.y = player.height;
+            // Boden: Boxdach nur, wenn man vorher schon darüber war
+            let groundY = groundAt(player.pos.x, player.pos.z, player.radius);
+            if (groundY === WALL_HEIGHT && prevFeet < WALL_HEIGHT - 0.2) groundY = 0;
+            if (player.pos.y - player.height <= groundY) {
+                player.pos.y = groundY + player.height;
                 player.vel.y = 0;
                 player.onGround = true;
             } else {
                 player.onGround = false;
+            }
+
+            // Aus der Map geflogen = sofort tot
+            if (Math.abs(player.pos.x) > halfGrid || Math.abs(player.pos.z) > halfGrid || player.pos.y < -15) {
+                respawnPlayer(null, 'Aus der Map geflogen!');
+                return;
             }
 
             // Bounce Pads
@@ -1512,7 +1533,7 @@
                 `X: ${player.pos.x.toFixed(1)} Y: ${player.pos.y.toFixed(1)} Z: ${player.pos.z.toFixed(1)}`;
         }
 
-        function respawnPlayer(killerName = null) {
+        function respawnPlayer(killerName = null, msg = null) {
             player.hp = 100;
             player.stamina = STAMINA_MAX;
             placeAtSpawn();
@@ -1522,7 +1543,7 @@
             if (killerName) {
                 addKillFeed(`Du wurdest von ${killerName} eliminiert!`);
             } else {
-                addKillFeed(`Respawn!`);
+                addKillFeed(msg || `Respawn!`);
             }
             updateHPUI();
         }
