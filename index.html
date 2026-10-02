@@ -245,6 +245,12 @@
         </div>
     </div>
 
+    <!-- Power-Up Anzeige -->
+    <div id="fx-hud" class="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-1 pointer-events-none">
+        <div id="fx-dmg" class="hidden glass-panel px-3 py-1 rounded-lg font-orbitron text-xs text-rose-300 border border-rose-500/60"></div>
+        <div id="fx-speed" class="hidden glass-panel px-3 py-1 rounded-lg font-orbitron text-xs text-yellow-300 border border-yellow-400/60"></div>
+    </div>
+
     <!-- Touch-Steuerung -->
     <div id="touch-ui" class="hidden fixed inset-0 z-[22] pointer-events-none">
         <div id="touch-look" class="absolute right-0 top-0 h-full w-[58%] pointer-events-auto" style="touch-action:none"></div>
@@ -696,6 +702,60 @@
             BOUNCE_PADS.push({ x: w.x, z: w.z, top, flash: 0 });
         });
 
+        // ----- Power-Ups (Host lässt sie spawnen, alle bekommen es per Netzwerk) -----
+        const PU_TYPES = { dmg: 0xff3355, speed: 0xffe600, heal: 0x22ff88 };
+        const powerups = [];
+        let puTimer = 3;
+        let lastMoveTime = performance.now(), afkWarned = false;
+        const afkAnchor = new THREE.Vector3();
+        const AFK_LIMIT_MS = 5 * 60 * 1000;
+        function addPowerup(d) {
+            if (!PU_TYPES[d.type] || powerups.some(p => p.id === d.id)) return;
+            const col = PU_TYPES[d.type];
+            const geo = d.type === 'dmg' ? new THREE.OctahedronGeometry(0.55) : d.type === 'speed' ? new THREE.TetrahedronGeometry(0.65) : new THREE.IcosahedronGeometry(0.5);
+            const g = new THREE.Group();
+            const gem = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col }));
+            const ring = new THREE.Mesh(new THREE.RingGeometry(0.8, 0.95, 32), new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, transparent: true, opacity: 0.8 }));
+            ring.rotation.x = -Math.PI / 2; ring.position.y = -0.95;
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 6, 16, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+            beam.position.y = 2;
+            g.add(gem, ring, beam);
+            g.position.set(d.x, d.y + 1.0, d.z);
+            decoGroup.add(g);
+            powerups.push({ id: d.id, type: d.type, x: d.x, z: d.z, y: d.y, mesh: g, gem });
+        }
+        function removePowerup(id) {
+            const i = powerups.findIndex(p => p.id === id);
+            if (i < 0) return;
+            decoGroup.remove(powerups[i].mesh);
+            powerups.splice(i, 1);
+        }
+        function spawnPowerup() {
+            const types = Object.keys(PU_TYPES);
+            for (let t = 0; t < 40; t++) {
+                const r = 1 + Math.floor(Math.random() * (MAZE_GRID_SIZE - 2));
+                const c = 1 + Math.floor(Math.random() * (MAZE_GRID_SIZE - 2));
+                let y = 0;
+                if (MAZE_GRID[r][c] === 1) { if (Math.random() > 0.4) continue; y = WALL_HEIGHT; } // manche liegen auf den Boxen
+                const w = cellToWorld(r, c);
+                if (SPAWN_POINTS.some(sp => Math.hypot(sp.x - w.x, sp.z - w.z) < 5)) continue;
+                if (BOUNCE_PADS.some(pd => Math.hypot(pd.x - w.x, pd.z - w.z) < 3)) continue;
+                if (powerups.some(pu => Math.hypot(pu.x - w.x, pu.z - w.z) < 4)) continue;
+                const d = { id: Math.random().toString(36).slice(2, 8), type: types[Math.floor(Math.random() * types.length)], x: w.x, z: w.z, y };
+                addPowerup(d);
+                broadcastData({ type: 'PU_SPAWN', ...d });
+                return;
+            }
+        }
+        function collectPowerup(pu) {
+            if (pu.type === 'dmg') { player.dmgShots = 2; addKillFeed('Power-Up: Schaden x2,5 für 2 Treffer!'); }
+            else if (pu.type === 'speed') { player.speedUntil = performance.now() + 8000; addKillFeed('Power-Up: Speed für 8 Sekunden!'); }
+            else { player.hp = Math.min(100, player.hp + 40); updateHPUI(); addKillFeed('Power-Up: +40 HP'); }
+            audio.playChatPing();
+            removePowerup(pu.id);
+            broadcastData({ type: 'PU_TAKE', id: pu.id });
+        }
+
         // Performant & bright lighting without heavy shadow computation
         const ambientLight = new THREE.AmbientLight(0x38bdf8, 0.85);
         scene.add(ambientLight);
@@ -752,7 +812,9 @@
             staminaDelay: 0,
             dashDir: new THREE.Vector3(),
             protectUntil: 0,
-            padCool: 0
+            padCool: 0,
+            dmgShots: 0,
+            speedUntil: 0
         };
 
         const keys = { w: false, a: false, s: false, d: false, space: false };
@@ -1224,6 +1286,7 @@
             document.exitPointerLock();
             document.getElementById('touch-ui').classList.add('hidden');
             document.body.classList.remove('touch-mode');
+            powerups.slice().forEach(pu => removePowerup(pu.id));
             analog.x = analog.y = 0; fireHeld = false;
             document.getElementById('pause-screen').classList.add('hidden');
             document.getElementById('lobby-screen').classList.remove('hidden');
@@ -1240,6 +1303,7 @@
 
             const onConnOpen = () => {
                 addKillFeed(`Mitspieler verbunden!`);
+                if (isHost) conn.send({ type: 'PU_SYNC', list: powerups.map(pu => ({ id: pu.id, type: pu.type, x: pu.x, z: pu.z, y: pu.y })) });
                 updateNetStatus(`Raum ${currentRoomCode} | ${Object.keys(connections).length + 1} Spieler`);
 
                 conn.send({
@@ -1453,6 +1517,15 @@
                     });
                 }
             }
+            else if (data.type === 'PU_SPAWN') {
+                addPowerup(data);
+            }
+            else if (data.type === 'PU_SYNC') {
+                if (Array.isArray(data.list)) data.list.forEach(addPowerup);
+            }
+            else if (data.type === 'PU_TAKE') {
+                removePowerup(data.id);
+            }
             else if (data.type === 'KILL') {
                 handleKill(data);
             }
@@ -1560,12 +1633,13 @@
                     broadcastData({
                         type: 'HIT',
                         targetId: peerId,
-                        damage: 10,
+                        damage: player.dmgShots > 0 ? 25 : 10,
                         knockback: knockbackImpulse,
                         attackerName: player.name,
                         attackerId: myPeerId,
                         attackerPos: { x: player.pos.x, y: player.pos.y, z: player.pos.z }
                     });
+                    if (player.dmgShots > 0) player.dmgShots--;
                     break;
                 }
             }
@@ -1642,7 +1716,7 @@
             moveDir.addScaledVector(forward, analog.y).addScaledVector(right, analog.x);
             if (moveDir.lengthSq() > 1 || keys.w || keys.a || keys.s || keys.d) moveDir.normalize();
 
-            const speed = isScoping ? 4.5 : 8.5;
+            const speed = (isScoping ? 4.5 : 8.5) * (performance.now() < player.speedUntil ? 1.55 : 1);
             let targetVelX = moveDir.x * speed;
             let targetVelZ = moveDir.z * speed;
 
@@ -1744,6 +1818,7 @@
             player.knockbackVel.set(0, 0, 0);
 
             player.lastAttacker = null;
+            player.dmgShots = 0; player.speedUntil = 0;
             if (!killerName && msg !== false) addKillFeed(msg || `Respawn!`);
             updateHPUI();
         }
@@ -1783,6 +1858,44 @@
 
             // Pad-Animation
             const tSec = now / 1000;
+
+            // Power-Ups: spawnen (nur Host), animieren, einsammeln
+            const lobbyHidden = document.getElementById('lobby-screen').classList.contains('hidden');
+
+            // AFK-Kick: 5 Minuten ohne Bewegung -> zurück in die Lobby
+            if (!lobbyHidden) {
+                lastMoveTime = now; afkWarned = false; afkAnchor.copy(player.pos);
+            } else {
+                if (Math.hypot(player.pos.x - afkAnchor.x, player.pos.z - afkAnchor.z) > 0.5) {
+                    afkAnchor.copy(player.pos); lastMoveTime = now; afkWarned = false;
+                }
+                const idle = now - lastMoveTime;
+                if (idle > AFK_LIMIT_MS) {
+                    lastMoveTime = now;
+                    backToLobby('Du wurdest wegen Inaktivität (5 Minuten ohne Bewegung) aus dem Raum entfernt.');
+                } else if (idle > AFK_LIMIT_MS - 30000 && !afkWarned) {
+                    afkWarned = true;
+                    addKillFeed('Noch 30 Sekunden bis zum AFK-Kick. Beweg dich!');
+                }
+            }
+            puTimer -= dt;
+            if (puTimer <= 0) {
+                puTimer = 9 + Math.random() * 6;
+                if (isHost && lobbyHidden && powerups.length < 5) spawnPowerup();
+            }
+            const canCollect = canPlay(), feetY = player.pos.y - player.height;
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                const pu = powerups[i];
+                pu.gem.rotation.y += dt * 2;
+                pu.mesh.position.y = pu.y + 1.0 + Math.sin(tSec * 2 + i) * 0.15;
+                if (canCollect && Math.hypot(player.pos.x - pu.x, player.pos.z - pu.z) < 1.4 && Math.abs(feetY - pu.y) < 1.6) collectPowerup(pu);
+            }
+            const fxD = document.getElementById('fx-dmg'), fxS = document.getElementById('fx-speed');
+            fxD.classList.toggle('hidden', player.dmgShots <= 0);
+            if (player.dmgShots > 0) fxD.textContent = `SCHADEN x2,5 · ${player.dmgShots} Treffer`;
+            const speedLeft = player.speedUntil - now;
+            fxS.classList.toggle('hidden', speedLeft <= 0);
+            if (speedLeft > 0) fxS.textContent = `SPEED · ${(speedLeft / 1000).toFixed(1)} s`;
             for (const pad of BOUNCE_PADS) {
                 pad.flash = Math.max(0, pad.flash - dt * 3);
                 pad.top.scale.setScalar(1 + 0.05 * Math.sin(tSec * 5) + pad.flash * 0.25);
