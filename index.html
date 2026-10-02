@@ -323,6 +323,8 @@
             </div>
 
             <!-- Game Control Hints -->
+            <div class="settings-box"></div>
+
             <div id="controls-hint" class="text-xs text-left bg-slate-900/60 p-3.5 rounded-lg border border-cyan-500/20 text-cyan-200/80 space-y-1 font-sans">
                 <div class="font-orbitron font-bold text-cyan-400 mb-1">STEUERUNG:</div>
                 <div><span class="text-cyan-300 font-semibold">WASD</span> : Bewegen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">LEERTASTE</span> : Springen</div>
@@ -341,6 +343,8 @@
             <p id="room-code-display" class="text-xs text-cyan-400/80 font-mono bg-slate-900/80 p-2.5 rounded border border-cyan-500/30 select-all cursor-pointer">
                 Raum Code: <span class="text-white font-bold">...</span> (Klicken zum Kopieren)
             </p>
+
+            <div class="settings-box"></div>
 
             <button id="btn-resume" class="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-orbitron font-bold py-3 rounded-lg transition shadow-[0_0_15px_#00f0ff]">
                 WEITERPIELEN
@@ -752,6 +756,12 @@
         };
 
         const keys = { w: false, a: false, s: false, d: false, space: false };
+        const settings = { fov: 75, sens: 1 };
+        try {
+            const o = JSON.parse(localStorage.getItem('arena-settings') || '{}');
+            if (o.fov) settings.fov = Math.min(110, Math.max(60, +o.fov));
+            if (o.sens) settings.sens = Math.min(2.5, Math.max(0.3, +o.sens));
+        } catch (e) {}
         const analog = { x: 0, y: 0 };      // Stick / Touch-Joystick (y>0 = vorwärts)
         let inputMode = 'kbm';              // 'kbm' | 'touch' | 'pad'
         let fireHeld = false, fireCool = 0;
@@ -864,7 +874,7 @@
 
         document.addEventListener('mousemove', (e) => {
             if (!isPointerLocked) return;
-            const sensitivity = isScoping ? 0.0008 : 0.0022;
+            const sensitivity = (isScoping ? 0.0008 : 0.0022) * settings.sens;
             player.yaw -= e.movementX * sensitivity;
             player.pitch -= e.movementY * sensitivity;
             player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch));
@@ -1347,6 +1357,31 @@
                 }
             } catch (e) {}
         }
+        const aaRay = new THREE.Raycaster();
+        function getAimAssist() {
+            const CONE = 0.14, MAXD = 70; // ca. 8 Grad
+            const cp = Math.cos(player.pitch);
+            const fx = -Math.sin(player.yaw) * cp, fy = Math.sin(player.pitch), fz = -Math.cos(player.yaw) * cp;
+            let best = null;
+            for (const id in remotePlayers) {
+                const rp = remotePlayers[id];
+                if (rp.prot) continue;
+                const tx = rp.mesh.position.x - player.pos.x, ty = rp.mesh.position.y + 1.0 - player.pos.y, tz = rp.mesh.position.z - player.pos.z;
+                const d = Math.hypot(tx, ty, tz);
+                if (d < 1 || d > MAXD) continue;
+                const ang = Math.acos(Math.max(-1, Math.min(1, (tx * fx + ty * fy + tz * fz) / d)));
+                if (ang > CONE || (best && ang >= best.ang)) continue;
+                aaRay.set(player.pos, new THREE.Vector3(tx / d, ty / d, tz / d)); // keine Hilfe durch Wände
+                const hit = aaRay.intersectObjects(mazeGroup.children);
+                if (hit.length && hit[0].distance < d - 0.5) continue;
+                best = { ang, tx, ty, tz, d };
+            }
+            if (!best) return null;
+            let dyaw = Math.atan2(-best.tx, -best.tz) - player.yaw;
+            dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+            const dpitch = Math.asin(best.ty / best.d) - player.pitch;
+            return { dyaw, dpitch, pull: 2.2 * (1 - best.ang / CONE) };
+        }
         const padPrev = [];
         function pollGamepad(dt) {
             let gp = null;
@@ -1362,9 +1397,16 @@
             analog.x = dz(gp.axes[0] || 0);
             analog.y = -dz(gp.axes[1] || 0);
             const lx = dz(gp.axes[2] || 0), ly = dz(gp.axes[3] || 0);
-            const sens = isScoping ? 1.0 : 2.8;
-            player.yaw -= lx * Math.abs(lx) * sens * dt * 1.4;
-            player.pitch -= ly * Math.abs(ly) * sens * dt * 1.4;
+            const sens = (isScoping ? 1.0 : 2.8) * settings.sens;
+            const aa = getAimAssist();
+            const slow = aa ? 0.55 : 1; // Reibung: Fadenkreuz wird auf Gegnern langsamer
+            player.yaw -= lx * Math.abs(lx) * sens * dt * 1.4 * slow;
+            player.pitch -= ly * Math.abs(ly) * sens * dt * 1.4 * slow;
+            if (aa && (fireHeld || isScoping)) { // sanfter Zug zum Gegner beim Schießen/Zoomen
+                const k = Math.min(1, aa.pull * dt);
+                player.yaw += aa.dyaw * k;
+                player.pitch += aa.dpitch * k;
+            }
             player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch));
             keys.space = down(0);
             fireHeld = down(7) || down(5);
@@ -1684,7 +1726,7 @@
             camera.rotation.set(player.pitch, player.yaw, 0, 'YXZ');
 
             // FOV-Kick beim Dash
-            const targetFov = isScoping ? 26 : (player.dashTime > 0 ? 90 : 75);
+            const targetFov = isScoping ? 26 : (player.dashTime > 0 ? settings.fov + 15 : settings.fov);
             if (Math.abs(camera.fov - targetFov) > 0.05) {
                 camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 14);
                 camera.updateProjectionMatrix();
@@ -1794,6 +1836,29 @@
             }
         }
 
+        // ----- Einstellungen (Lobby + Pause) -----
+        const SETTINGS_HTML = `
+            <div class="flex flex-col gap-1.5 text-left bg-slate-900/60 p-3 rounded-lg border border-cyan-500/20">
+                <div class="font-orbitron text-xs font-bold text-cyan-400"><i class="fa-solid fa-sliders mr-1.5"></i>EINSTELLUNGEN</div>
+                <label class="text-xs text-cyan-100 flex justify-between">SICHTFELD (FOV) <span data-val="fov" class="font-mono text-white"></span></label>
+                <input type="range" data-setting="fov" min="60" max="110" step="1" class="w-full accent-cyan-400">
+                <label class="text-xs text-cyan-100 flex justify-between">SENSIBILITÄT <span data-val="sens" class="font-mono text-white"></span></label>
+                <input type="range" data-setting="sens" min="0.3" max="2.5" step="0.05" class="w-full accent-cyan-400">
+            </div>`;
+        document.querySelectorAll('.settings-box').forEach(b => { b.innerHTML = SETTINGS_HTML; });
+        function syncSettingsUI() {
+            document.querySelectorAll('[data-setting]').forEach(inp => { inp.value = settings[inp.dataset.setting]; });
+            document.querySelectorAll('[data-val]').forEach(sp => {
+                sp.textContent = sp.dataset.val === 'fov' ? Math.round(settings.fov) + '°' : settings.sens.toFixed(2) + 'x';
+            });
+        }
+        document.querySelectorAll('[data-setting]').forEach(inp => inp.addEventListener('input', () => {
+            settings[inp.dataset.setting] = parseFloat(inp.value);
+            syncSettingsUI();
+            try { localStorage.setItem('arena-settings', JSON.stringify(settings)); } catch (e) {}
+        }));
+        syncSettingsUI();
+
         // ----- Steuerung wählen / Touch-Setup -----
         const MODE_KEY = 'arena-input-mode';
         const hintEl = document.getElementById('controls-hint');
@@ -1864,7 +1929,7 @@
                     const dx = t.clientX - lx, dy = t.clientY - ly;
                     lx = t.clientX; ly = t.clientY;
                     if (!canPlay()) continue;
-                    const sens = isScoping ? 0.0028 : 0.0055;
+                    const sens = (isScoping ? 0.0028 : 0.0055) * settings.sens;
                     player.yaw -= dx * sens;
                     player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch - dy * sens));
                 }
