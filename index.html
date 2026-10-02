@@ -145,6 +145,11 @@
     <!-- Red Damage Flash Filter -->
     <div id="damage-flash"></div>
 
+    <!-- Spawnschutz-Anzeige -->
+    <div id="spawn-protect" class="hidden absolute top-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none glass-panel px-4 py-1.5 rounded-lg font-orbitron text-sm text-sky-300 border border-sky-400/50">
+        <i class="fa-solid fa-shield-halved mr-2"></i>SPAWNSCHUTZ <span id="spawn-protect-time"></span>
+    </div>
+
     <!-- Center HUD Crosshair -->
     <div id="crosshair" class="flex items-center justify-center">
         <div class="w-2.5 h-2.5 bg-cyan-400 rounded-full shadow-[0_0_10px_#00f0ff]"></div>
@@ -249,6 +254,11 @@
 
             <!-- Room Connection Options -->
             <div class="flex flex-col gap-3">
+                <button id="btn-quick-join" class="w-full bg-gradient-to-r from-emerald-400 to-teal-500 hover:from-emerald-300 hover:to-teal-400 text-slate-950 font-orbitron font-extrabold py-3 rounded-lg transition-all shadow-[0_0_20px_rgba(52,211,153,0.4)] active:scale-95">
+                    <i class="fa-solid fa-bolt mr-2"></i>SCHNELLBEITRITT: ONLINE-LOBBY
+                </button>
+                <p class="text-[11px] text-cyan-200/60 -mt-1">Tritt direkt der öffentlichen Lobby bei. Ist keine online, wirst du Host.</p>
+                <div class="h-[1px] bg-cyan-500/20"></div>
                 <input id="custom-room-input" type="text" maxlength="16" placeholder="EIGENER RAUM CODE (OPTIONAL)" class="w-full bg-slate-900/90 border border-cyan-500/40 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-cyan-400 font-orbitron tracking-widest uppercase">
                 <button id="btn-create-room" class="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-orbitron font-extrabold py-3 rounded-lg transition-all shadow-[0_0_20px_rgba(0,240,255,0.4)] active:scale-95">
                     <i class="fa-solid fa-plus mr-2"></i>NEUEN RAUM ERSTELLEN
@@ -479,7 +489,7 @@
             const texture = new THREE.CanvasTexture(canvas);
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
-            texture.repeat.set(15, 15);
+            texture.repeat.set(MAZE_GRID_SIZE, MAZE_GRID_SIZE);
             return texture;
         }
 
@@ -523,35 +533,30 @@
         }
 
         // Arena parameters
-        const MAZE_GRID_SIZE = 15;
+        const MAZE_GRID_SIZE = 25;
         const TILE_SIZE = 7;
         const WALL_HEIGHT = 5.0;
 
         // Open Arena Map Layout: 1 = Wall/Pillar, 0 = Open Floor
-        const MAZE_GRID = [
-            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,0,1,1,0,0,0,0,0,0,0,1,1,0,1],
-            [1,0,1,1,0,0,1,0,1,0,0,1,1,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,0,0,0,1,1,0,0,0,1,1,0,0,0,1],
-            [1,0,0,1,1,0,0,0,0,0,1,1,0,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,0,0,1,1,0,0,0,0,0,1,1,0,0,1],
-            [1,0,0,0,1,1,0,0,0,1,1,0,0,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,0,1,1,0,0,1,0,1,0,0,1,1,0,1],
-            [1,0,1,1,0,0,0,0,0,0,0,1,1,0,1],
-            [1,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
-        ];
+        const MAZE_GRID = (() => {
+            const N = MAZE_GRID_SIZE;
+            const g = Array.from({ length: N }, (_, r) => Array.from({ length: N }, (_, c) => (r === 0 || c === 0 || r === N - 1 || c === N - 1) ? 1 : 0));
+            // Hindernisse einer Ecke (zeile0, spalte0, zeile1, spalte1), werden an alle 4 Ecken gespiegelt
+            const rects = [[2,2,3,3],[2,6,2,9],[5,5,6,6],[4,9,7,9],[8,2,9,2],[9,5,9,8],[11,7,11,10]];
+            rects.forEach(([r0, c0, r1, c1]) => {
+                for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+                    g[r][c] = g[N - 1 - r][c] = g[r][N - 1 - c] = g[N - 1 - r][N - 1 - c] = 1;
+                }
+            });
+            return g;
+        })();
 
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x040714);
-        scene.fog = new THREE.FogExp2(0x040714, 0.012);
+        scene.fog = new THREE.FogExp2(0x040714, 0.008);
 
-        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 160);
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 320);
         camera.rotation.order = 'YXZ';
 
         const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
@@ -608,8 +613,43 @@
         }
         scene.add(mazeGroup);
 
+        // ----- Spawnpunkte (gelb markiert) & Bounce Pads (grün) -----
+        const SPAWN_PROTECT_MS = 3000;
+        const PAD_POWER = 18;
+        const SPAWN_POINTS = [];
+        const BOUNCE_PADS = [];
+        const decoGroup = new THREE.Group(); // bewusst NICHT in mazeGroup (sonst treffen Schüsse die Deko)
+        scene.add(decoGroup);
+        const cellToWorld = (r, c) => ({ x: (c * TILE_SIZE) - halfGrid + TILE_SIZE / 2, z: (r * TILE_SIZE) - halfGrid + TILE_SIZE / 2 });
+
+        [[1,1],[1,23],[23,1],[23,23],[1,12],[23,12],[12,1],[12,23]].forEach(([r, c]) => {
+            if (MAZE_GRID[r][c] !== 0) return;
+            const w = cellToWorld(r, c);
+            SPAWN_POINTS.push({ x: w.x, z: w.z });
+            const ring = new THREE.Mesh(new THREE.RingGeometry(1.2, 1.6, 40), new THREE.MeshBasicMaterial({ color: 0xffc400, side: THREE.DoubleSide }));
+            ring.rotation.x = -Math.PI / 2; ring.position.set(w.x, 0.04, w.z);
+            const disc = new THREE.Mesh(new THREE.CircleGeometry(1.2, 40), new THREE.MeshBasicMaterial({ color: 0xffc400, transparent: true, opacity: 0.22, side: THREE.DoubleSide }));
+            disc.rotation.x = -Math.PI / 2; disc.position.set(w.x, 0.03, w.z);
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 7, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0xffc400, transparent: true, opacity: 0.1, side: THREE.DoubleSide, depthWrite: false }));
+            beam.position.set(w.x, 3.5, w.z);
+            decoGroup.add(ring, disc, beam);
+        });
+
+        [[12,12],[7,12],[17,12],[12,7],[12,17]].forEach(([r, c]) => {
+            if (MAZE_GRID[r][c] !== 0) return;
+            const w = cellToWorld(r, c);
+            const base = new THREE.Mesh(new THREE.CylinderGeometry(1.8, 1.9, 0.18, 32), new THREE.MeshStandardMaterial({ color: 0x0f172a, metalness: 0.8, roughness: 0.3 }));
+            base.position.set(w.x, 0.09, w.z);
+            const top = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.22, 32), new THREE.MeshBasicMaterial({ color: 0x22ff88 }));
+            top.position.set(w.x, 0.2, w.z);
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 5, 24, 1, true), new THREE.MeshBasicMaterial({ color: 0x22ff88, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+            beam.position.set(w.x, 2.5, w.z);
+            decoGroup.add(base, top, beam);
+            BOUNCE_PADS.push({ x: w.x, z: w.z, top, flash: 0 });
+        });
+
         // Performant & bright lighting without heavy shadow computation
-        const ambientLight = new THREE.AmbientLight(0x38bdf8, 0.65);
+        const ambientLight = new THREE.AmbientLight(0x38bdf8, 0.85);
         scene.add(ambientLight);
 
         const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
@@ -662,7 +702,9 @@
             dashTime: 0,
             dashCool: 0,
             staminaDelay: 0,
-            dashDir: new THREE.Vector3()
+            dashDir: new THREE.Vector3(),
+            protectUntil: 0,
+            padCool: 0
         };
 
         const keys = { w: false, a: false, s: false, d: false, space: false };
@@ -993,16 +1035,25 @@
 
         // ----- Spawn -----
         function placeAtSpawn() {
-            const halfG = (MAZE_GRID_SIZE * TILE_SIZE) / 2;
-            for (let i = 0; i < 200; i++) {
-                const r = 1 + Math.floor(Math.random() * (MAZE_GRID_SIZE - 2));
-                const c = 1 + Math.floor(Math.random() * (MAZE_GRID_SIZE - 2));
-                if (MAZE_GRID[r][c] === 0) {
-                    player.pos.set((c * TILE_SIZE) - halfG + TILE_SIZE / 2, player.height, (r * TILE_SIZE) - halfG + TILE_SIZE / 2);
-                    return;
+            // Spawnpunkt wählen, der möglichst weit von Gegnern entfernt ist
+            let best = null, bestScore = -1;
+            for (const sp of SPAWN_POINTS) {
+                let minD = 60;
+                for (const id in remotePlayers) {
+                    const m = remotePlayers[id].mesh.position;
+                    minD = Math.min(minD, Math.hypot(sp.x - m.x, sp.z - m.z));
                 }
+                const score = minD + Math.random() * 15;
+                if (score > bestScore) { bestScore = score; best = sp; }
             }
-            player.pos.set(0, player.height, 0);
+            if (best) {
+                player.pos.set(best.x, player.height, best.z);
+                player.yaw = Math.atan2(best.x, best.z); // zur Mitte schauen
+            } else {
+                player.pos.set(0, player.height, 0);
+            }
+            player.pitch = 0;
+            player.protectUntil = performance.now() + SPAWN_PROTECT_MS;
         }
 
         let peer = null;
@@ -1019,7 +1070,7 @@
             if (netDisp) netDisp.innerText = text;
         }
 
-        function initPeer(customRoomId = null) {
+        function initPeer(customRoomId = null, existingPeer = null) {
             updateNetStatus("Verbinde mit Server...");
 
             const peerOptions = {
@@ -1035,13 +1086,13 @@
             };
 
             try {
-                peer = customRoomId ? new Peer(customRoomId, peerOptions) : new Peer(peerOptions);
+                peer = existingPeer || (customRoomId ? new Peer(customRoomId, peerOptions) : new Peer(peerOptions));
             } catch(e) {
                 updateNetStatus("Fehler bei Peer-Initialisierung");
                 return;
             }
 
-            peer.on('open', (id) => {
+            const onPeerOpen = (id) => {
                 myPeerId = id;
                 updateNetStatus("Online | Raum: " + currentRoomCode);
                 
@@ -1058,7 +1109,8 @@
                         addKillFeed("Raum-Code in Zwischenablage kopiert!");
                     };
                 }
-            });
+            };
+            if (existingPeer && existingPeer.open) onPeerOpen(existingPeer.id); else peer.on('open', onPeerOpen);
 
             peer.on('connection', (conn) => {
                 setupConnection(conn);
@@ -1107,7 +1159,7 @@
             }
             connections[conn.peer] = conn;
 
-            conn.on('open', () => {
+            const onConnOpen = () => {
                 addKillFeed(`Mitspieler verbunden!`);
                 updateNetStatus(`Raum ${currentRoomCode} | ${Object.keys(connections).length + 1} Spieler`);
 
@@ -1118,7 +1170,8 @@
                     z: player.pos.z,
                     yaw: player.yaw,
                     name: player.name,
-                    skin: player.skin
+                    skin: player.skin,
+                prot: performance.now() < player.protectUntil
                 });
 
                 // Host schickt dem Neuen alle anderen Spieler, damit alle untereinander verbunden sind (Mesh)
@@ -1126,7 +1179,8 @@
                     const others = Object.keys(connections).filter(id => id !== conn.peer && connections[id].open);
                     if (others.length) conn.send({ type: 'PEERS', ids: others });
                 }
-            });
+            };
+            if (conn.open) onConnOpen(); else conn.on('open', onConnOpen);
 
             conn.on('data', (data) => {
                 handleNetworkData(conn.peer, data);
@@ -1181,11 +1235,13 @@
                         targetPos: new THREE.Vector3(data.x, data.y, data.z),
                         targetYaw: data.yaw,
                         name: data.name,
-                        skin: data.skin
+                        skin: data.skin,
+                        prot: !!data.prot
                     };
                 } else {
                     p.targetPos.set(data.x, data.y, data.z);
                     p.targetYaw = data.yaw;
+                    p.prot = !!data.prot;
                 }
             }
             else if (data.type === 'SHOOT') {
@@ -1206,10 +1262,13 @@
             }
             else if (data.type === 'HIT') {
                 if (data.targetId === myPeerId) {
-                    player.knockbackVel.x += data.knockback.x;
-                    player.knockbackVel.y += data.knockback.y;
-                    player.knockbackVel.z += data.knockback.z;
-
+                    if (performance.now() < player.protectUntil) return; // Spawnschutz
+                    // Je mehr Schaden, desto weiter fliegst du (100 HP: x1 ... 25 HP: x2.5)
+                    const kbMult = Math.min(2.5, 1 + (100 - Math.max(0, player.hp)) / 50);
+                    player.knockbackVel.x += data.knockback.x * kbMult;
+                    player.knockbackVel.z += data.knockback.z * kbMult;
+                    player.vel.y = Math.max(player.vel.y, 0) + data.knockback.y * kbMult;
+                    player.onGround = false;
                     player.hp -= data.damage;
                     audio.playHurt();
 
@@ -1235,7 +1294,8 @@
                 z: player.pos.z,
                 yaw: player.yaw,
                 name: player.name,
-                skin: player.skin
+                skin: player.skin,
+                prot: performance.now() < player.protectUntil
             };
 
             for (let id in connections) {
@@ -1246,6 +1306,7 @@
         }, 50);
 
         function shootWeapon() {
+            player.protectUntil = 0; // Schießen beendet den Spawnschutz
             audio.init();
             audio.playShoot();
 
@@ -1283,13 +1344,13 @@
                 
                 const distToRay = raycaster.ray.distanceToPoint(playerCenter);
                 const along = playerCenter.clone().sub(raycaster.ray.origin).dot(rayDir);
-                if (distToRay < 0.75 && along > 0 && along < wallDist) {
+                if (!rp.prot && distToRay < 0.75 && along > 0 && along < wallDist) {
                     audio.playHit();
 
                     const knockbackImpulse = {
-                        x: rayDir.x * 18.0,
-                        y: 5.5,
-                        z: rayDir.z * 18.0
+                        x: rayDir.x * 26.0,
+                        y: 7.5,
+                        z: rayDir.z * 26.0
                     };
 
                     broadcastData({
@@ -1347,9 +1408,9 @@
         }
 
         function updatePlayerPhysics(dt) {
-            player.knockbackVel.x *= 0.88;
-            player.knockbackVel.y *= 0.88;
-            player.knockbackVel.z *= 0.88;
+            const kbDecay = Math.pow(player.onGround ? 0.91 : 0.955, dt * 60);
+            player.knockbackVel.x *= kbDecay;
+            player.knockbackVel.z *= kbDecay;
 
             if (!player.onGround) {
                 player.vel.y -= 22.0 * dt;
@@ -1396,21 +1457,21 @@
             }
 
             const dx = (targetVelX + player.knockbackVel.x) * dt;
-            const dy = (player.vel.y + player.knockbackVel.y) * dt;
+            const dy = player.vel.y * dt;
             const dz = (targetVelZ + player.knockbackVel.z) * dt;
 
             const nextX = player.pos.x + dx;
             if (!checkAABBCollision(nextX, player.pos.z, player.radius)) {
                 player.pos.x = nextX;
             } else {
-                player.knockbackVel.x = 0;
+                player.knockbackVel.x = Math.abs(player.knockbackVel.x) > 6 ? -player.knockbackVel.x * 0.5 : 0; // Abprallen an Wänden
             }
 
             const nextZ = player.pos.z + dz;
             if (!checkAABBCollision(player.pos.x, nextZ, player.radius)) {
                 player.pos.z = nextZ;
             } else {
-                player.knockbackVel.z = 0;
+                player.knockbackVel.z = Math.abs(player.knockbackVel.z) > 6 ? -player.knockbackVel.z * 0.5 : 0;
             }
 
             player.pos.y += dy;
@@ -1418,6 +1479,23 @@
                 player.pos.y = player.height;
                 player.vel.y = 0;
                 player.onGround = true;
+            } else {
+                player.onGround = false;
+            }
+
+            // Bounce Pads
+            player.padCool = Math.max(0, player.padCool - dt);
+            if (player.padCool === 0 && player.pos.y - player.height < 0.7) {
+                for (const pad of BOUNCE_PADS) {
+                    if (Math.hypot(player.pos.x - pad.x, player.pos.z - pad.z) < 1.8) {
+                        player.vel.y = PAD_POWER;
+                        player.onGround = false;
+                        player.padCool = 0.35;
+                        pad.flash = 1;
+                        audio.playJump();
+                        break;
+                    }
+                }
             }
 
             camera.position.copy(player.pos);
@@ -1479,9 +1557,28 @@
 
             updatePlayerPhysics(dt);
 
+            // Pad-Animation
+            const tSec = now / 1000;
+            for (const pad of BOUNCE_PADS) {
+                pad.flash = Math.max(0, pad.flash - dt * 3);
+                pad.top.scale.setScalar(1 + 0.05 * Math.sin(tSec * 5) + pad.flash * 0.25);
+                pad.top.material.color.setHex(pad.flash > 0.05 ? 0xffffff : 0x22ff88);
+            }
+
+            // Spawnschutz-Anzeige
+            const protLeft = player.protectUntil - now;
+            document.getElementById('spawn-protect').classList.toggle('hidden', protLeft <= 0);
+            if (protLeft > 0) document.getElementById('spawn-protect-time').innerText = (protLeft / 1000).toFixed(1) + 's';
+
             for (let id in remotePlayers) {
                 const p = remotePlayers[id];
                 p.mesh.visible = true;
+                if (!p.shield) {
+                    p.shield = new THREE.Mesh(new THREE.SphereGeometry(1.15, 16, 12), new THREE.MeshBasicMaterial({ color: 0x38bdf8, transparent: true, opacity: 0.25, depthWrite: false }));
+                    p.shield.position.y = 1.0;
+                    p.mesh.add(p.shield);
+                }
+                p.shield.visible = !!p.prot;
                 p.mesh.position.lerp(p.targetPos, 0.25);
                 p.mesh.rotation.y = p.targetYaw;
             }
@@ -1533,6 +1630,38 @@
                 setupConnection(conn);
             });
             enterGame();
+        };
+
+        document.getElementById('btn-quick-join').onclick = () => {
+            readLobbyInputs();
+            isHost = false;
+            currentRoomCode = 'PUBLIC';
+            enterGame();
+            updateNetStatus('Suche Lobby...');
+            addKillFeed('Suche offene Lobby...');
+            let probe;
+            try {
+                probe = new Peer({ debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } });
+            } catch (e) { backToLobby('Verbindung fehlgeschlagen.'); return; }
+
+            let done = false;
+            const finish = (fn) => { if (done) return; done = true; clearTimeout(timer); fn(); };
+            const becomeHost = () => {
+                try { probe.destroy(); } catch (e) {}
+                isHost = true;
+                initPeer(ROOM_PREFIX + 'PUBLIC');
+                addKillFeed('Keine Lobby online: du bist jetzt Host!');
+            };
+            const timer = setTimeout(() => finish(becomeHost), 6000);
+
+            probe.on('open', () => {
+                const conn = probe.connect(ROOM_PREFIX + 'PUBLIC', { reliable: true });
+                conn.on('open', () => finish(() => { initPeer(null, probe); setupConnection(conn); }));
+            });
+            probe.on('error', (err) => {
+                if (err.type === 'peer-unavailable') finish(becomeHost);
+                else finish(() => { try { probe.destroy(); } catch (e) {} backToLobby('Verbindung fehlgeschlagen: ' + err.type); });
+            });
         };
 
         document.getElementById('btn-resume').onclick = () => {
