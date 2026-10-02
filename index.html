@@ -135,6 +135,26 @@
             background: rgba(0, 240, 255, 0.4);
             border-radius: 4px;
         }
+    
+        .mode-btn { background: rgba(15,23,42,.9); border: 2px solid rgba(0,240,255,.25); border-radius: .6rem; padding: .6rem .25rem; color: #cffafe; font-family: Orbitron, sans-serif; font-size: 10px; font-weight: 700; display: flex; flex-direction: column; align-items: center; gap: .35rem; cursor: pointer; transition: all .12s; }
+        .mode-btn i { font-size: 1.4rem; }
+        .mode-btn:hover { border-color: rgba(0,240,255,.6); }
+        .mode-btn.sel { border-color: #00f0ff; background: rgba(0,240,255,.2); box-shadow: 0 0 14px rgba(0,240,255,.4); color: #fff; }
+
+        /* Touch-Steuerung */
+        .tbtn { position: absolute; pointer-events: auto; border-radius: 9999px; border: 2px solid rgba(0,240,255,.6); background: rgba(10,16,30,.55); color: #e0faff; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; touch-action: none; }
+        .tbtn.on { background: rgba(0,240,255,.45); }
+        #joy-base { position: fixed; display: none; width: 110px; height: 110px; border-radius: 9999px; border: 2px solid rgba(0,240,255,.5); background: rgba(0,240,255,.08); transform: translate(-50%,-50%); pointer-events: none; }
+        #joy-knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; border-radius: 9999px; background: rgba(0,240,255,.5); transform: translate(-50%,-50%); }
+        body.touch-mode #hud-left { bottom: auto; top: 10px; left: 10px; transform: scale(.52); transform-origin: top left; }
+        body.touch-mode #hud-right { display: none; }
+
+        /* Kill-Feed (Fortnite-Stil) */
+        @keyframes feedIn { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: none; } }
+        .kill-entry { animation: feedIn .25s ease-out; display: flex; align-items: center; gap: .5rem; padding: .4rem .7rem; border-radius: .5rem; background: rgba(10,16,30,.85); border: 1px solid rgba(255,255,255,.15); font-family: Orbitron, sans-serif; font-size: .75rem; white-space: nowrap; }
+        .kill-entry.me-killer { border-color: #34d399; background: rgba(6,40,30,.9); box-shadow: 0 0 14px rgba(52,211,153,.55); }
+        .kill-entry.me-victim { border-color: #f43f5e; background: rgba(50,8,20,.9); box-shadow: 0 0 14px rgba(244,63,94,.55); }
+        .kill-dist { font-size: .65rem; font-weight: 700; padding: 1px 6px; border-radius: 6px; background: rgba(255,255,255,.12); color: #fde68a; }
     </style>
 </head>
 <body class="relative min-h-screen w-full select-none">
@@ -161,10 +181,10 @@
     <div id="scope-overlay"><div id="scope-dot"></div></div>
 
     <!-- Top Right Notification Log -->
-    <div id="killfeed" class="absolute top-4 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none max-w-xs"></div>
+    <div id="killfeed" class="absolute top-16 right-4 z-20 flex flex-col items-end gap-1.5 pointer-events-none max-w-sm"></div>
 
     <!-- Bottom Left Status HUD (In-Game Text Chat & Health) -->
-    <div class="absolute bottom-5 left-5 z-20 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+    <div id="hud-left" class="absolute bottom-5 left-5 z-20 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
         <!-- In-Game Text Chat Box -->
         <div id="chat-container" class="glass-panel p-3 rounded-xl flex flex-col gap-2 w-80 transition-all duration-200 border border-cyan-500/30">
             <div class="text-[10px] font-orbitron text-cyan-400 font-bold tracking-wider flex justify-between items-center border-b border-cyan-500/20 pb-1">
@@ -210,7 +230,7 @@
     </div>
 
     <!-- Bottom Right Details HUD -->
-    <div class="absolute bottom-5 right-5 z-20 glass-panel px-4 py-3 rounded-xl flex flex-col gap-1 text-xs font-orbitron text-cyan-300/80 pointer-events-none">
+    <div id="hud-right" class="absolute bottom-5 right-5 z-20 glass-panel px-4 py-3 rounded-xl flex flex-col gap-1 text-xs font-orbitron text-cyan-300/80 pointer-events-none">
         <div class="flex justify-between gap-4">
             <span>POS:</span>
             <span id="pos-display" class="text-white font-mono">X: 0.0 Y: 1.6 Z: 0.0</span>
@@ -223,6 +243,19 @@
             <span>KILLS:</span>
             <span id="stats-display" class="text-yellow-400 font-mono">0 Kills</span>
         </div>
+    </div>
+
+    <!-- Touch-Steuerung -->
+    <div id="touch-ui" class="hidden fixed inset-0 z-[22] pointer-events-none">
+        <div id="touch-look" class="absolute right-0 top-0 h-full w-[58%] pointer-events-auto" style="touch-action:none"></div>
+        <div id="touch-move" class="absolute left-0 bottom-0 h-[55%] w-[42%] pointer-events-auto" style="touch-action:none"></div>
+        <div id="joy-base"><div id="joy-knob"></div></div>
+        <button id="tb-fire" class="tbtn" style="right:28px;bottom:36px;width:92px;height:92px;background:rgba(255,40,80,.35);border-color:#ff2850"><i class="fa-solid fa-crosshairs"></i></button>
+        <button id="tb-jump" class="tbtn" style="right:138px;bottom:46px;width:66px;height:66px"><i class="fa-solid fa-angles-up"></i></button>
+        <button id="tb-dash" class="tbtn" style="right:44px;bottom:146px;width:60px;height:60px"><i class="fa-solid fa-bolt"></i></button>
+        <button id="tb-scope" class="tbtn" style="right:124px;bottom:132px;width:56px;height:56px"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+        <button id="tb-chat" class="tbtn" style="right:80px;top:10px;width:44px;height:44px"><i class="fa-solid fa-comments"></i></button>
+        <button id="tb-pause" class="tbtn" style="right:20px;top:10px;width:44px;height:44px"><i class="fa-solid fa-pause"></i></button>
     </div>
 
     <!-- Start Lobby Overlay Screen -->
@@ -248,6 +281,17 @@
                     <span id="skin-name" class="text-xs font-orbitron text-white/80"></span>
                 </div>
                 <div id="skin-grid" class="flex flex-wrap gap-2.5"></div>
+            </div>
+
+            <!-- Steuerung wählen -->
+            <div class="flex flex-col gap-2 text-left">
+                <label class="text-xs font-orbitron text-cyan-400">STEUERUNG WÄHLEN</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button class="mode-btn" data-mode="kbm"><i class="fa-solid fa-keyboard"></i>TASTATUR<br>&amp; MAUS</button>
+                    <button class="mode-btn" data-mode="touch"><i class="fa-solid fa-hand-pointer"></i>TOUCH<br>(HANDY/TABLET)</button>
+                    <button class="mode-btn" data-mode="pad"><i class="fa-solid fa-gamepad"></i>CONTROLLER</button>
+                </div>
+                <p id="pad-status" class="hidden text-[11px] text-cyan-200/70"></p>
             </div>
 
             <p id="lobby-error" class="hidden text-xs text-red-400 font-orbitron bg-red-950/40 border border-red-500/40 rounded-lg p-2"></p>
@@ -279,7 +323,7 @@
             </div>
 
             <!-- Game Control Hints -->
-            <div class="text-xs text-left bg-slate-900/60 p-3.5 rounded-lg border border-cyan-500/20 text-cyan-200/80 space-y-1 font-sans">
+            <div id="controls-hint" class="text-xs text-left bg-slate-900/60 p-3.5 rounded-lg border border-cyan-500/20 text-cyan-200/80 space-y-1 font-sans">
                 <div class="font-orbitron font-bold text-cyan-400 mb-1">STEUERUNG:</div>
                 <div><span class="text-cyan-300 font-semibold">WASD</span> : Bewegen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">LEERTASTE</span> : Springen</div>
                 <div><span class="text-cyan-300 font-semibold">LINKSE MAUSTASTE</span> : Schießen</div>
@@ -708,6 +752,27 @@
         };
 
         const keys = { w: false, a: false, s: false, d: false, space: false };
+        const analog = { x: 0, y: 0 };      // Stick / Touch-Joystick (y>0 = vorwärts)
+        let inputMode = 'kbm';              // 'kbm' | 'touch' | 'pad'
+        let fireHeld = false, fireCool = 0;
+        function canPlay() {
+            if (!document.getElementById('lobby-screen').classList.contains('hidden')) return false;
+            if (!document.getElementById('pause-screen').classList.contains('hidden')) return false;
+            if (isChatOpen || isCheatOpen) return false;
+            return inputMode === 'kbm' ? isPointerLocked : true;
+        }
+        function togglePause() {
+            if (!document.getElementById('lobby-screen').classList.contains('hidden')) return;
+            const ps = document.getElementById('pause-screen');
+            if (ps.classList.contains('hidden')) {
+                if (isChatOpen || isCheatOpen) return;
+                ps.classList.remove('hidden');
+                setScope(false); fireHeld = false; analog.x = analog.y = 0; keys.space = false;
+            } else {
+                ps.classList.add('hidden');
+                if (inputMode === 'kbm') container.requestPointerLock();
+            }
+        }
         let isPointerLocked = false;
         let isChatOpen = false;
         let isCheatOpen = false;
@@ -729,7 +794,7 @@
             isChatOpen = false;
             chatInputWrapper.classList.add('hidden');
             chatInput.value = '';
-            if (document.getElementById('lobby-screen').classList.contains('hidden') &&
+            if (inputMode === 'kbm' && document.getElementById('lobby-screen').classList.contains('hidden') &&
                 document.getElementById('pause-screen').classList.contains('hidden')) {
                 container.requestPointerLock();
             }
@@ -1008,7 +1073,7 @@
         }
 
         function tryDash() {
-            if (!isPointerLocked || isChatOpen || isCheatOpen) return;
+            if (!canPlay()) return;
             if (player.dashCool > 0 || player.dashTime > 0) return;
             if (player.stamina < DASH_COST) {
                 addKillFeed('Zu wenig Stamina!');
@@ -1021,6 +1086,7 @@
             if (keys.s) dir.sub(forward);
             if (keys.d) dir.add(right);
             if (keys.a) dir.sub(right);
+            dir.addScaledVector(forward, analog.y).addScaledVector(right, analog.x);
             if (dir.lengthSq() === 0) dir.copy(forward);
             dir.normalize();
 
@@ -1146,6 +1212,9 @@
             myPeerId = null;
             isHost = false;
             document.exitPointerLock();
+            document.getElementById('touch-ui').classList.add('hidden');
+            document.body.classList.remove('touch-mode');
+            analog.x = analog.y = 0; fireHeld = false;
             document.getElementById('pause-screen').classList.add('hidden');
             document.getElementById('lobby-screen').classList.remove('hidden');
             updateNetStatus('Offline');
@@ -1218,6 +1287,91 @@
             audio.playChatPing();
         }
 
+        // ----- Kill-Feed -----
+        function announceDeath(killer, dist, how) {
+            const d = { type: 'KILL', killerId: killer ? killer.id : null, killerName: killer ? killer.name : null,
+                        victimId: myPeerId, victimName: player.name, dist: Math.round(dist || 0), how: how };
+            broadcastData(d);
+            handleKill(d);
+        }
+        function announceVoidDeath() {
+            const la = player.lastAttacker;
+            const credit = la && la.id && (performance.now() - la.time < 8000);
+            announceDeath(credit ? { id: la.id, name: la.name } : null, credit ? la.dist : 0, credit ? 'knock' : 'void');
+        }
+        function addChatSystem(text) {
+            const box = document.getElementById('chat-messages');
+            const div = document.createElement('div');
+            div.className = 'break-words text-xs text-amber-300';
+            div.textContent = '☠ ' + text;
+            box.appendChild(div);
+            while (box.children.length > 60) box.removeChild(box.firstChild);
+            box.scrollTop = box.scrollHeight;
+        }
+        function handleKill(d) {
+            const meKiller = !!d.killerId && d.killerId === myPeerId;
+            const meVictim = !!d.victimId && d.victimId === myPeerId;
+            if (meKiller) {
+                player.kills++;
+                document.getElementById('stats-display').innerText = `${player.kills} Kills`;
+            }
+            const feed = document.getElementById('killfeed');
+            const row = document.createElement('div');
+            row.className = 'kill-entry' + (meKiller ? ' me-killer' : '') + (meVictim ? ' me-victim' : '');
+            const mk = (txt, cls) => { const sp = document.createElement('span'); sp.textContent = txt; sp.className = cls; return sp; };
+            const icon = (cls) => { const i = document.createElement('i'); i.className = 'fa-solid ' + cls; return i; };
+            if (d.killerName) {
+                row.appendChild(mk(d.killerName, 'text-cyan-300 font-bold'));
+                row.appendChild(icon(d.how === 'knock' ? 'fa-wind text-sky-300' : 'fa-crosshairs text-yellow-300'));
+            } else {
+                row.appendChild(icon('fa-explosion text-orange-400'));
+            }
+            row.appendChild(mk(d.victimName, 'text-rose-300 font-bold'));
+            const badge = d.killerName ? (d.how === 'knock' ? `Rauswurf · ${d.dist} m` : `${d.dist} m`) : 'Aus der Map';
+            row.appendChild(mk(badge, 'kill-dist'));
+            feed.appendChild(row);
+            while (feed.querySelectorAll('.kill-entry').length > 6) feed.querySelector('.kill-entry').remove();
+            setTimeout(() => { if (row.parentNode) row.parentNode.removeChild(row); }, 7000);
+
+            addChatSystem(d.killerName
+                ? `${d.killerName} hat ${d.victimName} ${d.how === 'knock' ? 'aus der Map geworfen' : 'eliminiert'} (${d.dist} m)`
+                : `${d.victimName} ist aus der Map geflogen`);
+        }
+
+        // ----- Controller -----
+        function rumble(ms, mag) {
+            if (inputMode !== 'pad') return;
+            try {
+                for (const g of navigator.getGamepads()) {
+                    if (g && g.vibrationActuator) { g.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: mag, weakMagnitude: mag }); break; }
+                }
+            } catch (e) {}
+        }
+        const padPrev = [];
+        function pollGamepad(dt) {
+            let gp = null;
+            for (const g of (navigator.getGamepads ? navigator.getGamepads() : [])) { if (g && g.connected) { gp = g; break; } }
+            if (!gp) { analog.x = analog.y = 0; fireHeld = false; return; }
+            const dz = (v) => Math.abs(v) < 0.16 ? 0 : (v - Math.sign(v) * 0.16) / 0.84;
+            const down = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
+            const edge = (i) => { const n = down(i), w = !!padPrev[i]; padPrev[i] = n; return n && !w; };
+            const eStart = edge(9), eA = edge(0), eB = edge(1), eL3 = edge(10);
+            if (eStart) { togglePause(); return; }
+            if (!document.getElementById('pause-screen').classList.contains('hidden')) { if (eA) togglePause(); return; }
+            if (!canPlay()) { analog.x = analog.y = 0; fireHeld = false; keys.space = false; setScope(false); return; }
+            analog.x = dz(gp.axes[0] || 0);
+            analog.y = -dz(gp.axes[1] || 0);
+            const lx = dz(gp.axes[2] || 0), ly = dz(gp.axes[3] || 0);
+            const sens = isScoping ? 1.0 : 2.8;
+            player.yaw -= lx * Math.abs(lx) * sens * dt * 1.4;
+            player.pitch -= ly * Math.abs(ly) * sens * dt * 1.4;
+            player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch));
+            keys.space = down(0);
+            fireHeld = down(7) || down(5);
+            setScope(down(6) || down(4));
+            if (eB || eL3) tryDash();
+        }
+
         function handleNetworkData(senderId, data) {
             if (data.type === 'STATE') {
                 let p = remotePlayers[senderId];
@@ -1257,6 +1411,9 @@
                     });
                 }
             }
+            else if (data.type === 'KILL') {
+                handleKill(data);
+            }
             else if (data.type === 'CHAT') {
                 addChatMessage(data.name || 'Spieler', data.message);
             }
@@ -1270,6 +1427,10 @@
                     player.vel.y = Math.max(player.vel.y, 0) + data.knockback.y * kbMult;
                     player.onGround = false;
                     player.hp -= data.damage;
+                    const ap = data.attackerPos;
+                    const hitDist = ap ? Math.hypot(ap.x - player.pos.x, ap.y - player.pos.y, ap.z - player.pos.z) : 0;
+                    player.lastAttacker = { id: data.attackerId, name: data.attackerName, dist: hitDist, time: performance.now() };
+                    rumble(150, 0.7);
                     audio.playHurt();
 
                     const flash = document.getElementById('damage-flash');
@@ -1277,6 +1438,7 @@
                     setTimeout(() => flash.style.opacity = '0', 150);
 
                     if (player.hp <= 0) {
+                        announceDeath({ id: data.attackerId, name: data.attackerName }, hitDist, 'shot');
                         respawnPlayer(data.attackerName);
                     }
                     updateHPUI();
@@ -1358,11 +1520,10 @@
                         targetId: peerId,
                         damage: 10,
                         knockback: knockbackImpulse,
-                        attackerName: player.name
+                        attackerName: player.name,
+                        attackerId: myPeerId,
+                        attackerPos: { x: player.pos.x, y: player.pos.y, z: player.pos.z }
                     });
-
-                    player.kills++;
-                    document.getElementById('stats-display').innerText = `${player.kills} Kills`;
                     break;
                 }
             }
@@ -1436,9 +1597,8 @@
             if (keys.d) moveDir.add(right);
             if (keys.a) moveDir.sub(right);
 
-            if (moveDir.lengthSq() > 0) {
-                moveDir.normalize();
-            }
+            moveDir.addScaledVector(forward, analog.y).addScaledVector(right, analog.x);
+            if (moveDir.lengthSq() > 1 || keys.w || keys.a || keys.s || keys.d) moveDir.normalize();
 
             const speed = isScoping ? 4.5 : 8.5;
             let targetVelX = moveDir.x * speed;
@@ -1500,7 +1660,8 @@
 
             // Aus der Map geflogen = sofort tot
             if (Math.abs(player.pos.x) > halfGrid || Math.abs(player.pos.z) > halfGrid || player.pos.y < -15) {
-                respawnPlayer(null, 'Aus der Map geflogen!');
+                announceVoidDeath();
+                respawnPlayer(null, false);
                 return;
             }
 
@@ -1540,11 +1701,8 @@
             player.vel.set(0, 0, 0);
             player.knockbackVel.set(0, 0, 0);
 
-            if (killerName) {
-                addKillFeed(`Du wurdest von ${killerName} eliminiert!`);
-            } else {
-                addKillFeed(msg || `Respawn!`);
-            }
+            player.lastAttacker = null;
+            if (!killerName && msg !== false) addKillFeed(msg || `Respawn!`);
             updateHPUI();
         }
 
@@ -1576,6 +1734,9 @@
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
 
+            if (inputMode === 'pad') pollGamepad(dt);
+            fireCool = Math.max(0, fireCool - dt);
+            if (inputMode !== 'kbm' && fireHeld && fireCool <= 0 && canPlay()) { shootWeapon(); fireCool = 0.28; }
             updatePlayerPhysics(dt);
 
             // Pad-Animation
@@ -1619,8 +1780,111 @@
 
         function enterGame() {
             document.getElementById('lobby-screen').classList.add('hidden');
-            container.requestPointerLock();
+            document.body.classList.toggle('touch-mode', inputMode === 'touch');
+            document.getElementById('touch-ui').classList.toggle('hidden', inputMode !== 'touch');
+            if (inputMode === 'kbm') {
+                container.requestPointerLock();
+            } else if (inputMode === 'touch') {
+                try {
+                    const el = document.documentElement;
+                    const rf = el.requestFullscreen || el.webkitRequestFullscreen;
+                    if (rf) { const pr = rf.call(el); if (pr && pr.catch) pr.catch(() => {}); }
+                    if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {});
+                } catch (e) {}
+            }
         }
+
+        // ----- Steuerung wählen / Touch-Setup -----
+        const MODE_KEY = 'arena-input-mode';
+        const hintEl = document.getElementById('controls-hint');
+        const HINTS = {
+            kbm: hintEl.innerHTML,
+            touch: '<div class="font-orbitron font-bold text-cyan-400 mb-1">TOUCH (Querformat):</div><div><span class="text-cyan-300 font-semibold">Linke Seite</span> : Joystick zum Bewegen</div><div><span class="text-cyan-300 font-semibold">Rechte Seite wischen</span> : Umschauen</div><div>Rechts unten: Schießen, Springen, Dash, Zoom &nbsp;|&nbsp; Oben rechts: Chat &amp; Pause</div>',
+            pad: '<div class="font-orbitron font-bold text-cyan-400 mb-1">CONTROLLER:</div><div><span class="text-cyan-300 font-semibold">Linker Stick</span> : Bewegen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">Rechter Stick</span> : Umschauen</div><div><span class="text-cyan-300 font-semibold">RT / RB</span> : Schießen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">LT / LB</span> : Zoom</div><div><span class="text-cyan-300 font-semibold">A</span> : Springen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">B / L3</span> : Dash</div><div><span class="text-cyan-300 font-semibold">START</span> : Pause (A zum Fortsetzen)</div>'
+        };
+        function updatePadStatus() {
+            const el = document.getElementById('pad-status');
+            el.classList.toggle('hidden', inputMode !== 'pad');
+            let gp = null;
+            for (const g of (navigator.getGamepads ? navigator.getGamepads() : [])) { if (g && g.connected) { gp = g; break; } }
+            el.textContent = gp ? 'Controller erkannt: ' + gp.id.slice(0, 40) : 'Kein Controller erkannt. Drücke eine Taste am Controller.';
+        }
+        function setInputMode(m) {
+            inputMode = m;
+            document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('sel', b.dataset.mode === m));
+            hintEl.innerHTML = HINTS[m];
+            updatePadStatus();
+            try { localStorage.setItem(MODE_KEY, m); } catch (e) {}
+        }
+        document.querySelectorAll('.mode-btn').forEach(b => b.onclick = () => setInputMode(b.dataset.mode));
+        window.addEventListener('gamepadconnected', updatePadStatus);
+        window.addEventListener('gamepaddisconnected', updatePadStatus);
+        (function () {
+            let m = null;
+            try { m = localStorage.getItem(MODE_KEY); } catch (e) {}
+            if (!HINTS[m]) m = (navigator.maxTouchPoints > 0 && window.matchMedia('(pointer:coarse)').matches) ? 'touch' : 'kbm';
+            setInputMode(m);
+        })();
+
+        (function initTouchControls() {
+            const move = document.getElementById('touch-move'), look = document.getElementById('touch-look');
+            const base = document.getElementById('joy-base'), knob = document.getElementById('joy-knob');
+            const R = 55;
+            let moveId = null, ox = 0, oy = 0, lookId = null, lx = 0, ly = 0;
+            const opt = { passive: false };
+            move.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (moveId !== null) return;
+                const t = e.changedTouches[0];
+                moveId = t.identifier; ox = t.clientX; oy = t.clientY;
+                base.style.left = ox + 'px'; base.style.top = oy + 'px'; base.style.display = 'block';
+                knob.style.transform = 'translate(-50%,-50%)';
+            }, opt);
+            move.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for (const t of e.changedTouches) if (t.identifier === moveId) {
+                    let dx = t.clientX - ox, dy = t.clientY - oy;
+                    const d = Math.hypot(dx, dy);
+                    if (d > R) { dx *= R / d; dy *= R / d; }
+                    knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    analog.x = dx / R; analog.y = -dy / R;
+                }
+            }, opt);
+            const endMove = (e) => { for (const t of e.changedTouches) if (t.identifier === moveId) { moveId = null; analog.x = analog.y = 0; base.style.display = 'none'; } };
+            move.addEventListener('touchend', endMove); move.addEventListener('touchcancel', endMove);
+
+            look.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                if (lookId !== null) return;
+                const t = e.changedTouches[0]; lookId = t.identifier; lx = t.clientX; ly = t.clientY;
+            }, opt);
+            look.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                for (const t of e.changedTouches) if (t.identifier === lookId) {
+                    const dx = t.clientX - lx, dy = t.clientY - ly;
+                    lx = t.clientX; ly = t.clientY;
+                    if (!canPlay()) continue;
+                    const sens = isScoping ? 0.0028 : 0.0055;
+                    player.yaw -= dx * sens;
+                    player.pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, player.pitch - dy * sens));
+                }
+            }, opt);
+            const endLook = (e) => { for (const t of e.changedTouches) if (t.identifier === lookId) lookId = null; };
+            look.addEventListener('touchend', endLook); look.addEventListener('touchcancel', endLook);
+
+            const bind = (id, down, up) => {
+                const el = document.getElementById(id);
+                el.addEventListener('touchstart', (e) => { e.preventDefault(); el.classList.add('on'); down && down(); }, opt);
+                const end = (e) => { e.preventDefault(); el.classList.remove('on'); up && up(); };
+                el.addEventListener('touchend', end, opt); el.addEventListener('touchcancel', end, opt);
+            };
+            bind('tb-fire', () => { fireHeld = true; }, () => { fireHeld = false; });
+            bind('tb-jump', () => { keys.space = true; }, () => { keys.space = false; });
+            bind('tb-dash', () => tryDash());
+            bind('tb-scope', () => { if (canPlay()) setScope(!isScoping); });
+            bind('tb-chat', () => { if (canPlay()) openChat(); });
+            bind('tb-pause', () => togglePause());
+        })();
 
         document.getElementById('btn-create-room').onclick = () => {
             let code = sanitizeCode(document.getElementById('custom-room-input').value);
@@ -1687,11 +1951,11 @@
 
         document.getElementById('btn-resume').onclick = () => {
             document.getElementById('pause-screen').classList.add('hidden');
-            container.requestPointerLock();
+            if (inputMode === 'kbm') container.requestPointerLock();
         };
 
         container.addEventListener('click', () => {
-            if (document.getElementById('lobby-screen').classList.contains('hidden') &&
+            if (inputMode === 'kbm' && document.getElementById('lobby-screen').classList.contains('hidden') &&
                 document.getElementById('pause-screen').classList.contains('hidden') &&
                 !isChatOpen && !isCheatOpen) {
                 container.requestPointerLock();
@@ -1700,6 +1964,7 @@
 
         document.addEventListener('pointerlockchange', () => {
             isPointerLocked = (document.pointerLockElement === container);
+            if (inputMode !== 'kbm') return;
             if (!isPointerLocked) setScope(false);
             const lobbyScreen = document.getElementById('lobby-screen');
             const pauseScreen = document.getElementById('pause-screen');
