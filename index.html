@@ -1432,7 +1432,9 @@ const LAYOUTS = {
         let selectedSkin = 'cyan';
         const skinGrid = document.getElementById('skin-grid');
         function selectSkin(id) {
+            if (!SKINS.some(sk => sk.id === id)) id = 'cyan';
             selectedSkin = id;
+            try { localStorage.setItem('arena-skin', id); } catch (e) {}
             const sk = getSkin(id);
             document.getElementById('skin-name').innerText = sk.name;
             document.getElementById('skin-name').style.color = hexStr(sk.body);
@@ -1449,7 +1451,15 @@ const LAYOUTS = {
             b.onclick = () => selectSkin(sk.id);
             skinGrid.appendChild(b);
         });
-        selectSkin('cyan');
+        let savedSkin = 'cyan';
+        try { savedSkin = localStorage.getItem('arena-skin') || 'cyan'; } catch (e) {}
+        selectSkin(savedSkin);
+        // Spielername am Gerät speichern (bleibt nach Neuladen / neuem Tab)
+        (() => {
+            const nameInput = document.getElementById('username-input');
+            try { const n = localStorage.getItem('arena-name'); if (n) nameInput.value = n; } catch (e) {}
+            nameInput.addEventListener('input', () => { try { localStorage.setItem('arena-name', nameInput.value.trim()); } catch (e) {} });
+        })();
 
         function applySkinToGun() {
             const sk = getSkin(player.skin);
@@ -1695,6 +1705,8 @@ const LAYOUTS = {
             return [
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
                 { urls: 'stun:staticauth.openrelay.metered.ca:80' },
                 { urls: ['turn:staticauth.openrelay.metered.ca:80', 'turn:staticauth.openrelay.metered.ca:443',
                          'turn:staticauth.openrelay.metered.ca:443?transport=tcp', 'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
@@ -1708,14 +1720,7 @@ const LAYOUTS = {
 
             const peerOptions = {
                 debug: 1,
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' }
-                    ]
-                }
+                config: { iceServers: getIceServers() }
             };
 
             try {
@@ -2677,6 +2682,7 @@ const LAYOUTS = {
         function readLobbyInputs() {
             audio.init();
             player.name = document.getElementById('username-input').value.trim() || "Spieler";
+            try { localStorage.setItem('arena-name', player.name); } catch (e) {}
             player.skin = selectedSkin;
             applySkinToGun();
             player.stamina = STAMINA_MAX;
@@ -2917,7 +2923,7 @@ const LAYOUTS = {
             addKillFeed('Suche offene Lobby...');
             let probe;
             try {
-                probe = new Peer({ debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } });
+                probe = new Peer({ debug: 0, config: { iceServers: getIceServers() } });
             } catch (e) { backToLobby('Verbindung fehlgeschlagen.'); return; }
 
             let done = false;
