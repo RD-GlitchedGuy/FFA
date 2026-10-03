@@ -1658,20 +1658,57 @@ const LAYOUTS = {
             if (netDisp) netDisp.innerText = text;
         }
 
+        // ----- STUN + TURN (TURN leitet die Verbindung um, wenn WLAN/Handynetz direkte Verbindungen blockiert) -----
+        function sha1Bytes(bytes) {
+            const ml = bytes.length * 8, w = new Array(80);
+            const msg = bytes.slice(); msg.push(0x80);
+            while (msg.length % 64 !== 56) msg.push(0);
+            for (let i = 7; i >= 0; i--) msg.push(i >= 4 ? 0 : (ml >>> (i * 8)) & 255);
+            let h0 = 0x67452301, h1 = 0xEFCDAB89, h2 = 0x98BADCFE, h3 = 0x10325476, h4 = 0xC3D2E1F0;
+            for (let o = 0; o < msg.length; o += 64) {
+                for (let i = 0; i < 16; i++) w[i] = (msg[o + 4 * i] << 24) | (msg[o + 4 * i + 1] << 16) | (msg[o + 4 * i + 2] << 8) | msg[o + 4 * i + 3];
+                for (let i = 16; i < 80; i++) { const x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]; w[i] = (x << 1) | (x >>> 31); }
+                let a = h0, b = h1, c = h2, d = h3, e = h4;
+                for (let i = 0; i < 80; i++) {
+                    const f = i < 20 ? (b & c) | (~b & d) : i < 40 ? b ^ c ^ d : i < 60 ? (b & c) | (b & d) | (c & d) : b ^ c ^ d;
+                    const k = i < 20 ? 0x5A827999 : i < 40 ? 0x6ED9EBA1 : i < 60 ? 0x8F1BBCDC : 0xCA62C1D6;
+                    const t = (((a << 5) | (a >>> 27)) + f + e + k + w[i]) | 0;
+                    e = d; d = c; c = (b << 30) | (b >>> 2); b = a; a = t;
+                }
+                h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0; h4 = (h4 + e) | 0;
+            }
+            const out = [];
+            for (const h of [h0, h1, h2, h3, h4]) out.push((h >>> 24) & 255, (h >>> 16) & 255, (h >>> 8) & 255, h & 255);
+            return out;
+        }
+        function hmacSha1Base64(key, text) {
+            const enc = (str) => Array.from(unescape(encodeURIComponent(str)), ch => ch.charCodeAt(0));
+            let k = enc(key); if (k.length > 64) k = sha1Bytes(k);
+            while (k.length < 64) k.push(0);
+            const inner = sha1Bytes(k.map(b => b ^ 0x36).concat(enc(text)));
+            const mac = sha1Bytes(k.map(b => b ^ 0x5c).concat(inner));
+            return btoa(String.fromCharCode.apply(null, mac));
+        }
+        function getIceServers() {
+            const user = (Math.floor(Date.now() / 1000) + 24 * 3600) + ':catto';
+            const cred = hmacSha1Base64('openrelayprojectsecret', user); // Open Relay (metered.ca), kostenlos
+            return [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                { urls: 'stun:staticauth.openrelay.metered.ca:80' },
+                { urls: ['turn:staticauth.openrelay.metered.ca:80', 'turn:staticauth.openrelay.metered.ca:443',
+                         'turn:staticauth.openrelay.metered.ca:443?transport=tcp', 'turns:staticauth.openrelay.metered.ca:443?transport=tcp'],
+                  username: user, credential: cred }
+            ];
+        }
+
         let peerTries = 0;
         function initPeer(customRoomId = null, existingPeer = null, onOpen = null) {
             updateNetStatus("Verbinde mit Server..." + (peerTries ? ' (Versuch ' + (peerTries + 1) + ')' : ''));
 
             const peerOptions = {
                 debug: 1,
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' },
-                        { urls: 'stun:stun3.l.google.com:19302' }
-                    ]
-                }
+                config: { iceServers: getIceServers() }
             };
 
             try {
@@ -1687,9 +1724,9 @@ const LAYOUTS = {
             const openTimer = existingPeer ? null : setTimeout(() => {
                 if (opened || peer !== thisPeer) return;
                 try { thisPeer.destroy(); } catch (e) {}
-                if (peerTries < 2) { peerTries++; addKillFeed('Server antwortet nicht – neuer Versuch...'); initPeer(customRoomId, null, onOpen); }
+                if (peerTries < 2) { peerTries++; addKillFeed('Server antwortet nicht – neuer Versuch...'); setTimeout(() => { if (peer === thisPeer) initPeer(customRoomId, null, onOpen); }, 3000); }
                 else { peerTries = 0; backToLobby('Keine Verbindung zum Multiplayer-Server. Prüfe dein Internet/WLAN und öffne die index.html direkt im Browser (nicht in einer Vorschau-App).'); }
-            }, 9000);
+            }, 20000);
             const onPeerOpen = (id) => {
                 opened = true; peerTries = 0; if (openTimer) clearTimeout(openTimer);
                 myPeerId = id;
@@ -1725,7 +1762,19 @@ const LAYOUTS = {
             peer.on('error', (err) => {
                 console.error("PeerJS Error:", err);
                 if (err.type === 'unavailable-id' && currentRoomCode === 'PUBLIC') {
-                    backToLobby('Die öffentliche Lobby startet gerade bei jemand anderem – drück nochmal SCHNELLBEITRITT.');
+                    // Jemand anderes ist schon Host -> einfach beitreten statt rauswerfen
+                    if (openTimer) clearTimeout(openTimer);
+                    try { thisPeer.destroy(); } catch (e) {}
+                    peer = null; isHost = false;
+                    quickJoinTries++;
+                    if (quickJoinTries <= 4) { addKillFeed('Lobby läuft schon – trete bei...'); setTimeout(() => quickJoin(), 1500); }
+                    else backToLobby('Die Public-Lobby ist erreichbar, aber die Verbindung zum Host klappt nicht. Versuch es gleich nochmal.');
+                    return;
+                }
+                if (err.type === 'unavailable-id' && peerTries > 0) { // eigener alter Versuch blockiert die ID noch kurz
+                    if (openTimer) clearTimeout(openTimer);
+                    try { thisPeer.destroy(); } catch (e) {}
+                    setTimeout(() => { if (peer === thisPeer) initPeer(customRoomId, null, onOpen); }, 4000);
                     return;
                 }
                 if (['network', 'server-error', 'socket-error', 'socket-closed'].includes(err.type) && !opened) {
@@ -2836,20 +2885,32 @@ const LAYOUTS = {
             initPeer(null, null, () => {
                 const conn = peer.connect(ROOM_PREFIX + code, { reliable: true });
                 setupConnection(conn);
+                updateNetStatus('Raum gefunden – verbinde...');
+                setTimeout(() => {
+                    if (!conn.open && peer && !isHost && currentRoomCode === code && Object.keys(connections).every(k => !connections[k].open))
+                        backToLobby('Der Raum wurde gefunden, aber die Verbindung zum Host klappt nicht (WLAN/Firewall). Versuch es nochmal.');
+                }, 20000);
             });
             enterGame();
         };
 
+        let quickJoinTries = 0;
         document.getElementById('btn-quick-join').onclick = () => {
             readLobbyInputs();
             isHost = false;
             currentRoomCode = 'PUBLIC';
+            quickJoinTries = 0;
             enterGame();
+            quickJoin();
+        };
+        function quickJoin() {
+            if (document.getElementById('lobby-screen').classList.contains('hidden') === false) return; // schon zurück im Menü
+            isHost = false;
             updateNetStatus('Suche Lobby...');
             addKillFeed('Suche offene Lobby...');
             let probe;
             try {
-                probe = new Peer({ debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } });
+                probe = new Peer({ debug: 0, config: { iceServers: getIceServers() } });
             } catch (e) { backToLobby('Verbindung fehlgeschlagen.'); return; }
 
             let done = false;
@@ -2863,10 +2924,12 @@ const LAYOUTS = {
                 initPeer(ROOM_PREFIX + 'PUBLIC');
                 addKillFeed('Keine Lobby online: du bist jetzt Host!');
             };
-            let probeOpen = false;
+            let probeOpen = false, hostFound = false;
             // Nach 6 s: Server erreichbar aber kein Host -> selbst Host. Server gar nicht erreichbar -> bis 15 s warten, dann Fehler.
             let timer = setTimeout(function check() {
-                if (probeOpen) finish(becomeHost);
+                if (probeOpen && !hostFound) finish(becomeHost);
+                else if (probeOpen) timer = setTimeout(() => finish(() => { try { probe.destroy(); } catch (e) {}
+                    backToLobby('Public-Lobby gefunden, aber die Verbindung zum Host wurde blockiert (WLAN/Firewall). Versuch es nochmal oder erstelle einen eigenen Raum.'); }), 14000);
                 else timer = setTimeout(() => finish(() => { try { probe.destroy(); } catch (e) {} backToLobby('Keine Verbindung zum Multiplayer-Server. Prüfe dein Internet/WLAN und öffne die index.html direkt im Browser (nicht in einer Vorschau-App).'); }), 9000);
             }, 6000);
 
@@ -2874,13 +2937,15 @@ const LAYOUTS = {
                 probeOpen = true;
                 updateNetStatus('Suche Lobby...');
                 const conn = probe.connect(ROOM_PREFIX + 'PUBLIC', { reliable: true });
-                conn.on('open', () => finish(() => { initPeer(null, probe); setupConnection(conn); }));
+                conn.on('open', () => finish(() => { quickJoinTries = 0; initPeer(null, probe); setupConnection(conn); }));
+                // Kein "peer-unavailable" nach 2 s = Host existiert -> nicht selbst Host werden, sondern länger auf die Verbindung warten
+                setTimeout(() => { if (!done) { hostFound = true; updateNetStatus('Lobby gefunden – verbinde...'); } }, 2500);
             });
             probe.on('error', (err) => {
                 if (err.type === 'peer-unavailable') finish(becomeHost);
                 else finish(() => { try { probe.destroy(); } catch (e) {} backToLobby('Keine Verbindung zum Multiplayer-Server (' + err.type + '). Prüfe dein Internet/WLAN und öffne die index.html direkt im Browser (nicht in einer Vorschau-App).'); });
             });
-        };
+        }
 
         document.getElementById('btn-resume').onclick = () => {
             document.getElementById('pause-screen').classList.add('hidden');
