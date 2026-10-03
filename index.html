@@ -1779,7 +1779,7 @@ const LAYOUTS = {
                     try { thisPeer.destroy(); } catch (e) {}
                     peer = null; isHost = false;
                     quickJoinTries++;
-                    if (quickJoinTries <= 4) { addKillFeed('Lobby läuft schon – trete bei...'); setTimeout(() => quickJoin(), 1500); }
+                    if (quickJoinTries <= 4) { addKillFeed('Lobby läuft schon – trete bei...'); setTimeout(() => quickJoin(publicSlot), 1500); }
                     else backToLobby('Die Public-Lobby ist erreichbar, aber die Verbindung zum Host klappt nicht. Versuch es gleich nochmal.');
                     return;
                 }
@@ -2914,13 +2914,20 @@ const LAYOUTS = {
             currentRoomCode = 'PUBLIC';
             quickJoinTries = 0;
             enterGame();
-            quickJoin();
+            quickJoin(1);
         };
-        function quickJoin() {
+        // Public-Lobby hat mehrere "Slots": Hängt ein toter/unerreichbarer Host auf Slot 1 (z. B. eingeschlafener Tab),
+        // geht es automatisch mit Slot 2, 3 ... weiter, statt alle Spieler zu blockieren.
+        const PUBLIC_SLOTS = 5;
+        let publicSlot = 1;
+        const publicPeerId = (slot) => ROOM_PREFIX + 'PUBLIC' + (slot > 1 ? '-' + slot : '');
+        function quickJoin(slot) {
             if (document.getElementById('lobby-screen').classList.contains('hidden') === false) return; // schon zurück im Menü
+            publicSlot = slot || publicSlot || 1;
+            const targetId = publicPeerId(publicSlot);
             isHost = false;
-            updateNetStatus('Suche Lobby...');
-            addKillFeed('Suche offene Lobby...');
+            updateNetStatus('Suche Lobby...' + (publicSlot > 1 ? ' (Server ' + publicSlot + ')' : ''));
+            if (!slot) addKillFeed('Suche offene Lobby...');
             let probe;
             try {
                 probe = new Peer({ debug: 0, config: { iceServers: getIceServers() } });
@@ -2934,25 +2941,28 @@ const LAYOUTS = {
                 applyMap(publicMapForNow(), false);
                 lastRotSlot = Math.floor(Date.now() / ROT_MS);
                 peerTries = 0;
-                initPeer(ROOM_PREFIX + 'PUBLIC');
-                addKillFeed('Keine Lobby online: du bist jetzt Host!');
+                initPeer(targetId);
+                addKillFeed('Keine Lobby online: du bist jetzt Host!' + (publicSlot > 1 ? ' (Server ' + publicSlot + ')' : ''));
             };
-            let probeOpen = false, hostFound = false;
-            // Nach 6 s: Server erreichbar aber kein Host -> selbst Host. Server gar nicht erreichbar -> bis 15 s warten, dann Fehler.
+            let probeOpen = false;
+            const nextSlot = () => {
+                try { probe.destroy(); } catch (e) {}
+                if (publicSlot < PUBLIC_SLOTS) { addKillFeed('Lobby antwortet nicht – nehme nächsten Server...'); quickJoin(publicSlot + 1); }
+                else backToLobby('Keine Public-Lobby erreichbar. Versuch es gleich nochmal oder erstelle einen eigenen Raum.');
+            };
+            // Server erreichbar: bis 12 s auf Lobby-Verbindung oder "kein Host" warten, sonst nächster Slot.
+            // Server gar nicht erreichbar -> nach 15 s Fehler.
             let timer = setTimeout(function check() {
-                if (probeOpen && !hostFound) finish(becomeHost);
-                else if (probeOpen) timer = setTimeout(() => finish(() => { try { probe.destroy(); } catch (e) {}
-                    backToLobby('Public-Lobby gefunden, aber die Verbindung zum Host wurde blockiert (WLAN/Firewall). Versuch es nochmal oder erstelle einen eigenen Raum.'); }), 14000);
+                if (probeOpen) timer = setTimeout(() => finish(nextSlot), 6000);
                 else timer = setTimeout(() => finish(() => { try { probe.destroy(); } catch (e) {} backToLobby('Keine Verbindung zum Multiplayer-Server. Prüfe dein Internet/WLAN und öffne die index.html direkt im Browser (nicht in einer Vorschau-App).'); }), 9000);
             }, 6000);
 
             probe.on('open', () => {
                 probeOpen = true;
                 updateNetStatus('Suche Lobby...');
-                const conn = probe.connect(ROOM_PREFIX + 'PUBLIC', { reliable: true });
+                const conn = probe.connect(targetId, { reliable: true });
                 conn.on('open', () => finish(() => { quickJoinTries = 0; initPeer(null, probe); setupConnection(conn); }));
-                // Kein "peer-unavailable" nach 2 s = Host existiert -> nicht selbst Host werden, sondern länger auf die Verbindung warten
-                setTimeout(() => { if (!done) { hostFound = true; updateNetStatus('Lobby gefunden – verbinde...'); } }, 2500);
+                setTimeout(() => { if (!done) updateNetStatus('Verbinde mit Lobby...'); }, 2500);
             });
             probe.on('error', (err) => {
                 if (err.type === 'peer-unavailable') finish(becomeHost);
