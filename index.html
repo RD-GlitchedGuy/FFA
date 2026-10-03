@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FFA Shooter V1.8</title>
+    <title>Sci-Fi Arena Shooter 3D</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Three.js Library -->
@@ -114,6 +114,30 @@
         .skin-swatch:hover { transform: scale(1.1); }
         .skin-swatch.selected { border-color: #fff; transform: scale(1.18); }
 
+        /* ---- Menü-Overlays: immer sichtbar & scrollbar (auch Handy/Tablet) ---- */
+        #lobby-screen, #create-screen, #pause-screen, #cheat-menu {
+            position: fixed !important; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
+            touch-action: pan-y; align-items: flex-start !important; padding: 12px 0; transform: translateZ(0);
+            top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important; width: 100%; height: 100%;
+            -webkit-backdrop-filter: none !important; backdrop-filter: none !important; /* Blur über WebGL = Menü unsichtbar (PC, Konsole, Handy) */
+        }
+        #lobby-screen, #create-screen { background: rgba(2, 6, 23, .94) !important; }
+        #pause-screen, #cheat-menu { background: rgba(2, 6, 23, .86) !important; }
+        #lobby-screen .glass-panel, #create-screen .glass-panel, #pause-screen .glass-panel, #cheat-menu .glass-panel {
+            -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background: rgba(10, 16, 30, .97);
+        }
+        #lobby-screen > div, #create-screen > div, #pause-screen > div, #cheat-menu > div { margin-top: auto !important; margin-bottom: auto !important; }
+        /* Handy/Tablet: Blur über WebGL lässt Menüs auf vielen Geräten verschwinden -> ohne Blur, dafür dunkler */
+        @media (pointer: coarse) {
+            #lobby-screen, #create-screen, #pause-screen, #cheat-menu, .glass-panel { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+            #pause-screen, #cheat-menu { background: rgba(2, 6, 23, .88) !important; }
+            .glass-panel { background: rgba(10, 16, 30, .96); }
+        }
+        body.touch-mode #lobby-screen, body.touch-mode #create-screen, body.touch-mode #pause-screen, body.touch-mode #cheat-menu, body.touch-mode .glass-panel { -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+        body.touch-mode #pause-screen, body.touch-mode #cheat-menu { background: rgba(2, 6, 23, .88) !important; }
+        /* Controller-Fokus in Menüs */
+        .pad-focus { outline: 3px solid #fde047 !important; outline-offset: 3px; box-shadow: 0 0 16px rgba(253, 224, 71, .7) !important; }
+
         #scope-overlay {
             position: absolute; inset: 0; z-index: 25; pointer-events: none; display: none;
             background: radial-gradient(circle at center, transparent 0, transparent 30vmin, rgba(0,0,0,0.97) 30.4vmin);
@@ -222,7 +246,7 @@
         <!-- Health Bar Box -->
         <div class="glass-panel p-3.5 rounded-xl flex flex-col gap-1.5 w-80">
             <div class="flex justify-between items-center text-xs font-orbitron">
-                <span class="text-cyan-400 font-bold"><i class="fa-solid fa-heart mr-1.5"></i>HEALTH</span>
+                <span class="text-cyan-400 font-bold"><i class="fa-solid fa-heart mr-1.5"></i>GESUNDHEIT</span>
                 <span id="hp-text" class="text-white font-bold">100 HP</span>
             </div>
             <div class="w-full bg-slate-800/80 rounded-full h-3.5 p-0.5 border border-cyan-500/30">
@@ -290,9 +314,9 @@
         <div class="glass-panel p-8 rounded-2xl max-w-md w-full mx-4 max-h-[95vh] overflow-y-auto flex flex-col gap-4 text-center border border-cyan-500/40 shadow-[0_0_50px_rgba(0,240,255,0.15)]">
             <div>
                 <h1 class="text-3xl font-black font-orbitron bg-gradient-to-r from-cyan-400 via-teal-300 to-indigo-400 bg-clip-text text-transparent tracking-wider">
-                    FFA Shooter
+                    CATTO ARENA 3D
                 </h1>
-                <p class="text-sm text-cyan-200/70 mt-1">Multiplayer FFA mit Knockback</p>
+                <p class="text-sm text-cyan-200/70 mt-1">Multiplayer Sci-Fi Shooter mit Knockback</p>
             </div>
 
             <!-- Player Name Input -->
@@ -364,7 +388,7 @@
                 <div><span class="text-cyan-300 font-semibold">WASD</span> : Bewegen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">LEERTASTE</span> : Springen</div>
                 <div><span class="text-cyan-300 font-semibold">LINKSE MAUSTASTE</span> : Schießen</div>
                 <div><span class="text-cyan-300 font-semibold">T / ENTER</span> : Text Chat öffnen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">ESC</span> : Menü</div>
-                <div><span class="text-cyan-300 font-semibold">SHIFT</span> : Dash (kostet Stamina) &nbsp;|&nbsp; 
+                <div><span class="text-cyan-300 font-semibold">SHIFT</span> : Dash (kostet Stamina) &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">M</span> : Cheat Menü</div>
                 <div><span class="text-cyan-300 font-semibold">RECHTE MAUSTASTE</span> (halten) : Scope / Zoom</div>
             </div>
         </div>
@@ -407,11 +431,15 @@
             <div class="settings-box"></div>
 
             <button id="btn-resume" class="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-orbitron font-bold py-3 rounded-lg transition shadow-[0_0_15px_#00f0ff]">
-                WEITERPIELEN
+                WEITERSPIELEN
             </button>
             <button id="btn-main-menu" class="w-full bg-slate-800 hover:bg-rose-600 text-white font-orbitron font-bold py-2.5 rounded-lg border border-rose-400/50 transition">
                 <i class="fa-solid fa-house mr-2"></i>HAUPTMENÜ
             </button>
+            <button id="btn-open-cheat" class="w-full bg-slate-800 hover:bg-fuchsia-700 text-white font-orbitron font-bold py-2.5 rounded-lg border border-fuchsia-400/50 transition">
+                <i class="fa-solid fa-user-secret mr-2"></i>CHEAT MENÜ
+            </button>
+            <p class="text-[10px] text-cyan-200/50 font-orbitron">CONTROLLER: Stick/D-Pad = wählen · A = OK · B = zurück · rechter Stick = scrollen</p>
         </div>
     </div>
 
@@ -1259,6 +1287,7 @@ const LAYOUTS = {
                 if (isChatOpen || isCheatOpen) return;
                 ps.classList.remove('hidden');
                 setScope(false); fireHeld = false; analog.x = analog.y = 0; keys.space = false;
+                if (document.pointerLockElement) document.exitPointerLock(); // Maus für die Menü-Knöpfe freigeben
             } else {
                 ps.classList.add('hidden');
                 if (inputMode === 'kbm') container.requestPointerLock();
@@ -1533,11 +1562,14 @@ const LAYOUTS = {
             cheats.infStamina = !cheats.infStamina;
             setToggleUI('cheat-stamina-state', cheats.infStamina);
         };
+        document.getElementById('btn-open-cheat').onclick = () => { document.getElementById('pause-screen').classList.add('hidden'); toggleCheatMenu(); };
         document.getElementById('btn-close-cheat').onclick = () => { if (isCheatOpen) toggleCheatMenu(); };
         setToggleUI('cheat-wallhack-state', false);
         setToggleUI('cheat-stamina-state', false);
 
+        let lastCheatToggle = 0;
         function toggleCheatMenu() {
+            lastCheatToggle = performance.now();
             const menu = document.getElementById('cheat-menu');
             if (!isCheatOpen) {
                 if (!document.getElementById('lobby-screen').classList.contains('hidden') ||
@@ -1550,7 +1582,7 @@ const LAYOUTS = {
             } else {
                 isCheatOpen = false;
                 menu.classList.add('hidden');
-                container.requestPointerLock();
+                if (inputMode === 'kbm') container.requestPointerLock();
             }
         }
 
@@ -1837,11 +1869,49 @@ const LAYOUTS = {
         }
 
         // ----- Controller -----
+        // Robust auf allen Geräten (Safari/iPad, Konsole, PC): Index-Schleife statt for..of, Standard-Layout bevorzugt
+        function getPad() {
+            let list = [];
+            try { list = navigator.getGamepads ? (navigator.getGamepads() || []) : (navigator.webkitGetGamepads ? navigator.webkitGetGamepads() : []); } catch (e) { return null; }
+            let any = null;
+            for (let i = 0; i < list.length; i++) {
+                const g = list[i];
+                if (!g || g.connected === false) continue;
+                if (g.mapping === 'standard') return g;
+                if (!any) any = g;
+            }
+            return any;
+        }
+        function padActive(g) {
+            for (let i = 0; i < g.buttons.length; i++) { const b = g.buttons[i]; if (b && (b.pressed || b.value > 0.5)) return true; }
+            for (let i = 0; i < g.axes.length; i++) if (Math.abs(g.axes[i] || 0) > 0.5) return true;
+            return false;
+        }
+        // Automatisch auf Controller umschalten, sobald einer benutzt wird (auch mitten im Spiel)
+        function autoPadMode() {
+            const g = getPad();
+            if (!g || inputMode === 'pad' || !padActive(g)) return;
+            setInputMode('pad');
+            document.getElementById('touch-ui').classList.add('hidden');
+            document.body.classList.remove('touch-mode');
+            analog.x = analog.y = 0; fireHeld = false;
+            if (document.pointerLockElement) document.exitPointerLock();
+            addKillFeed('Controller erkannt: Steuerung auf Controller umgestellt');
+        }
+        // Touch im Spiel -> zurück zur Touch-Steuerung
+        document.addEventListener('touchstart', () => {
+            if (inputMode !== 'pad' || !document.getElementById('lobby-screen').classList.contains('hidden')) return;
+            setInputMode('touch');
+            document.getElementById('touch-ui').classList.remove('hidden');
+            document.body.classList.add('touch-mode');
+        }, { passive: true });
         function rumble(ms, mag) {
             if (inputMode !== 'pad') return;
             try {
-                for (const g of navigator.getGamepads()) {
-                    if (g && g.vibrationActuator) { g.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: mag, weakMagnitude: mag }); break; }
+                const g = getPad();
+                if (g && g.vibrationActuator && g.vibrationActuator.playEffect) {
+                    const pr = g.vibrationActuator.playEffect('dual-rumble', { duration: ms, strongMagnitude: mag, weakMagnitude: mag });
+                    if (pr && pr.catch) pr.catch(() => {});
                 }
             } catch (e) {}
         }
@@ -1871,16 +1941,102 @@ const LAYOUTS = {
             return { dyaw, dpitch, pull: 2.2 * (1 - best.ang / CONE) };
         }
         const padPrev = [];
+        // ----- Controller in Menüs: Fokus bewegen, A = klicken, B = zurück, rechter Stick = scrollen -----
+        const PAD_MENU_IDS = ['create-screen', 'lobby-screen', 'cheat-menu', 'pause-screen']; // oberstes zuerst
+        function activePadMenu() {
+            for (const id of PAD_MENU_IDS) { const el = document.getElementById(id); if (!el.classList.contains('hidden')) return el; }
+            return null;
+        }
+        const menuPrev = []; let menuFocus = null, menuOf = null, navHold = 0, navDir = '';
+        function menuItems(m) {
+            return [...m.querySelectorAll('button, input, .skin-swatch, #room-code-display, [data-mode]')]
+                .filter(e => e.offsetParent !== null && !e.disabled && e.getClientRects().length);
+        }
+        function setMenuFocus(el) {
+            if (menuFocus) menuFocus.classList.remove('pad-focus');
+            menuFocus = el;
+            if (el) { el.classList.add('pad-focus'); el.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+        }
+        function moveMenuFocus(m, dir) {
+            const items = menuItems(m);
+            if (!items.length) return;
+            if (!menuFocus || !items.includes(menuFocus)) { setMenuFocus(items[0]); return; }
+            const a = menuFocus.getBoundingClientRect(), ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+            let best = null, bestScore = Infinity;
+            for (const it of items) {
+                if (it === menuFocus) continue;
+                const b = it.getBoundingClientRect(), dx = b.left + b.width / 2 - ax, dy = b.top + b.height / 2 - ay;
+                const main = dir === 'up' ? -dy : dir === 'down' ? dy : dir === 'left' ? -dx : dx;
+                const side = (dir === 'up' || dir === 'down') ? Math.abs(dx) : Math.abs(dy);
+                if (main <= 4 || side > main * 2.5) continue;
+                const score = main + side * 2.5;
+                if (score < bestScore) { bestScore = score; best = it; }
+            }
+            if (best) setMenuFocus(best);
+        }
+        function menuScroller(m) {
+            if (m.scrollHeight > m.clientHeight + 2) return m;
+            const inner = m.firstElementChild;
+            return inner && inner.scrollHeight > inner.clientHeight + 2 ? inner : m;
+        }
+        function pollMenuPad(dt) {
+            const m = activePadMenu();
+            if (!m) { if (menuFocus) setMenuFocus(null); menuOf = null; return; }
+            let gp = null;
+            gp = getPad();
+            if (!gp) return;
+            if (document.activeElement && document.activeElement.type === 'text') return; // beim Tippen nicht stören
+            const down = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
+            const edge = (i) => { const n = down(i), w = !!menuPrev[i]; menuPrev[i] = n; return n && !w; };
+            const eA = edge(0), eB = edge(1);
+            if (menuOf !== m) {
+                menuOf = m; setMenuFocus(null);
+                const pref = document.getElementById({ 'lobby-screen': 'btn-quick-join', 'create-screen': 'btn-create-confirm', 'pause-screen': 'btn-resume', 'cheat-menu': 'cheat-wallhack' }[m.id]);
+                if (pref && pref.offsetParent !== null) setMenuFocus(pref); else moveMenuFocus(m, 'down');
+                return;
+            }
+            const lx = gp.axes[0] || 0, ly = gp.axes[1] || 0;
+            let dir = '';
+            if (down(12) || ly < -0.5) dir = 'up'; else if (down(13) || ly > 0.5) dir = 'down';
+            else if (down(14) || lx < -0.5) dir = 'left'; else if (down(15) || lx > 0.5) dir = 'right';
+            if (dir) {
+                navHold -= dt;
+                if (dir !== navDir || navHold <= 0) {
+                    const isRange = menuFocus && menuFocus.type === 'range';
+                    if (isRange && (dir === 'left' || dir === 'right')) {
+                        const st = parseFloat(menuFocus.step) || 1;
+                        menuFocus.value = parseFloat(menuFocus.value) + (dir === 'right' ? st : -st);
+                        menuFocus.dispatchEvent(new Event('input', { bubbles: true }));
+                        navHold = 0.06;
+                    } else { moveMenuFocus(m, dir); navHold = dir === navDir ? 0.13 : 0.32; }
+                    navDir = dir;
+                }
+            } else { navDir = ''; navHold = 0; }
+            // rechter Stick = scrollen
+            const ry = gp.axes[3] || 0;
+            if (Math.abs(ry) > 0.2) menuScroller(m).scrollTop += ry * 900 * dt;
+            if (eA && menuFocus) {
+                if (menuFocus.tagName === 'INPUT' && menuFocus.type === 'text') menuFocus.focus();
+                else menuFocus.click();
+            }
+            if (eB) {
+                if (m.id === 'create-screen') document.getElementById('btn-create-back').click();
+                else if (m.id === 'cheat-menu') toggleCheatMenu();
+                else if (m.id === 'pause-screen') togglePause();
+            }
+        }
+
         function pollGamepad(dt) {
             let gp = null;
-            for (const g of (navigator.getGamepads ? navigator.getGamepads() : [])) { if (g && g.connected) { gp = g; break; } }
+            gp = getPad();
             if (!gp) { analog.x = analog.y = 0; fireHeld = false; return; }
             const dz = (v) => Math.abs(v) < 0.16 ? 0 : (v - Math.sign(v) * 0.16) / 0.84;
             const down = (i) => !!(gp.buttons[i] && (gp.buttons[i].pressed || gp.buttons[i].value > 0.5));
             const edge = (i) => { const n = down(i), w = !!padPrev[i]; padPrev[i] = n; return n && !w; };
             const eStart = edge(9), eA = edge(0), eB = edge(1), eL3 = edge(10);
             if (eStart) { togglePause(); return; }
-            if (!document.getElementById('pause-screen').classList.contains('hidden')) { if (eA) togglePause(); else if (eB) backToLobby(''); return; }
+            if (edge(8)) { toggleCheatMenu(); return; } // SELECT/BACK = Cheat-Menü
+            if (activePadMenu()) { analog.x = analog.y = 0; fireHeld = false; keys.space = false; setScope(false); return; } // Menü steuert pollMenuPad()
             if (!canPlay()) { analog.x = analog.y = 0; fireHeld = false; keys.space = false; setScope(false); return; }
             analog.x = dz(gp.axes[0] || 0);
             analog.y = -dz(gp.axes[1] || 0);
@@ -2311,6 +2467,8 @@ const LAYOUTS = {
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
 
+            autoPadMode();
+            pollMenuPad(dt);
             if (inputMode === 'pad') pollGamepad(dt);
             fireCool = Math.max(0, fireCool - dt);
             if (inputMode !== 'kbm' && fireHeld && fireCool <= 0 && canPlay()) { shootWeapon(); fireCool = 0.28; }
@@ -2443,6 +2601,8 @@ const LAYOUTS = {
         }
 
         function enterGame() {
+            const cd = document.getElementById('room-code-display');
+            if (cd) cd.innerHTML = 'RAUM CODE: <b class="text-cyan-300 font-mono text-sm">' + currentRoomCode + '</b>';
             document.getElementById('lobby-screen').classList.add('hidden');
             document.getElementById('create-screen').classList.add('hidden');
             document.body.classList.toggle('touch-mode', inputMode === 'touch');
@@ -2466,7 +2626,6 @@ const LAYOUTS = {
             island: 'Insel im Meer. Nicht runterfallen!',
             candy: 'Bunte Boxen und ein Regenbogen',
             frost: 'Eis, Schnee und kühle Farben',
-            vulkan_: '',
             volcano: 'Lava-Löcher im Boden',
             boss: 'Koop gegen Gegner-Wellen und Boss'
         };
@@ -2540,7 +2699,7 @@ const LAYOUTS = {
             const el = document.getElementById('pad-status');
             el.classList.toggle('hidden', inputMode !== 'pad');
             let gp = null;
-            for (const g of (navigator.getGamepads ? navigator.getGamepads() : [])) { if (g && g.connected) { gp = g; break; } }
+            gp = getPad();
             el.textContent = gp ? 'Controller erkannt: ' + gp.id.slice(0, 40) : 'Kein Controller erkannt. Drücke eine Taste am Controller.';
         }
         function setInputMode(m) {
@@ -2700,6 +2859,16 @@ const LAYOUTS = {
             }
         });
 
+        // Fallback: Pause auch ohne Pointer-Lock (z. B. eingebettet, Konsole) – ESC oder P
+        document.addEventListener('keydown', (e) => {
+            if (isChatOpen || isCheatOpen) return;
+            if (performance.now() - lastCheatToggle < 250) return;
+            if ((e.code === 'Escape' && !isPointerLocked) || e.code === 'KeyP') { e.preventDefault(); togglePause(); }
+        });
+        document.addEventListener('pointerlockerror', () => {
+            if (inputMode === 'kbm' && document.getElementById('lobby-screen').classList.contains('hidden') && !isChatOpen && !isCheatOpen)
+                document.getElementById('pause-screen').classList.remove('hidden');
+        });
         document.addEventListener('pointerlockchange', () => {
             isPointerLocked = (document.pointerLockElement === container);
             if (inputMode !== 'kbm') return;
