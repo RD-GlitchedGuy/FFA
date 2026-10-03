@@ -388,7 +388,7 @@
                 <div><span class="text-cyan-300 font-semibold">WASD</span> : Bewegen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">LEERTASTE</span> : Springen</div>
                 <div><span class="text-cyan-300 font-semibold">LINKSE MAUSTASTE</span> : Schießen</div>
                 <div><span class="text-cyan-300 font-semibold">T / ENTER</span> : Text Chat öffnen &nbsp;|&nbsp; <span class="text-cyan-300 font-semibold">ESC</span> : Menü</div>
-                <div><span class="text-cyan-300 font-semibold">SHIFT</span> : Dash (kostet Stamina) &nbsp;|&nbsp; 
+                <div><span class="text-cyan-300 font-semibold">SHIFT</span> : Dash (kostet Stamina)</div>
                 <div><span class="text-cyan-300 font-semibold">RECHTE MAUSTASTE</span> (halten) : Scope / Zoom</div>
             </div>
         </div>
@@ -1560,7 +1560,8 @@ const LAYOUTS = {
             cheats.infStamina = !cheats.infStamina;
             setToggleUI('cheat-stamina-state', cheats.infStamina);
         };
-        document.getElementById('btn-open-cheat').onclick = () => { document.getElementById('pause-screen').classList.add('hidden'); toggleCheatMenu(); };
+        const btnOpenCheat = document.getElementById('btn-open-cheat');
+        if (btnOpenCheat) btnOpenCheat.onclick = () => { document.getElementById('pause-screen').classList.add('hidden'); toggleCheatMenu(); };
         document.getElementById('btn-close-cheat').onclick = () => { if (isCheatOpen) toggleCheatMenu(); };
         setToggleUI('cheat-wallhack-state', false);
         setToggleUI('cheat-stamina-state', false);
