@@ -10,7 +10,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <!-- PeerJS Library for WebRTC Data Sync -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -1714,6 +1714,12 @@ const LAYOUTS = {
             ];
         }
 
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && peer && !peer.destroyed && peer.disconnected) {
+                try { peer.reconnect(); updateNetStatus('Verbinde neu...'); } catch (e) {}
+            }
+        });
+
         let peerTries = 0;
         function initPeer(customRoomId = null, existingPeer = null, onOpen = null) {
             updateNetStatus("Verbinde mit Server..." + (peerTries ? ' (Versuch ' + (peerTries + 1) + ')' : ''));
@@ -2181,7 +2187,7 @@ const LAYOUTS = {
                 if (peer && Array.isArray(data.ids)) {
                     data.ids.forEach(id => {
                         if (id !== myPeerId && !connections[id]) {
-                            setupConnection(peer.connect(id, { reliable: true }));
+                            setupConnection(peer.connect(id, { reliable: true, serialization: 'json' }));
                         }
                     });
                 }
@@ -2896,12 +2902,12 @@ const LAYOUTS = {
             currentRoomCode = code;
             peerTries = 0;
             initPeer(null, null, () => {
-                const conn = peer.connect(ROOM_PREFIX + code, { reliable: true });
+                const conn = peer.connect(ROOM_PREFIX + code, { reliable: true, serialization: 'json' });
                 setupConnection(conn);
                 updateNetStatus('Raum gefunden – verbinde...');
                 setTimeout(() => {
                     if (!conn.open && peer && !isHost && currentRoomCode === code && Object.keys(connections).every(k => !connections[k].open))
-                        backToLobby('Der Raum wurde gefunden, aber die Verbindung zum Host klappt nicht (WLAN/Firewall). Versuch es nochmal.');
+                        backToLobby('Der Raum wurde gefunden, aber der Host antwortet nicht. Tipp: Der Host-Tab muss offen und sichtbar sein (nicht im Hintergrund-Tab) – teste mit zwei Fenstern nebeneinander oder zwei Geräten.');
                 }, 20000);
             });
             enterGame();
@@ -2947,22 +2953,22 @@ const LAYOUTS = {
             let probeOpen = false;
             const nextSlot = () => {
                 try { probe.destroy(); } catch (e) {}
-                if (publicSlot < PUBLIC_SLOTS) { addKillFeed('Lobby antwortet nicht – nehme nächsten Server...'); quickJoin(publicSlot + 1); }
+                if (publicSlot < PUBLIC_SLOTS) { addKillFeed('Host von Lobby ' + publicSlot + ' antwortet nicht – nehme Lobby ' + (publicSlot + 1) + '...'); quickJoin(publicSlot + 1); }
                 else backToLobby('Keine Public-Lobby erreichbar. Versuch es gleich nochmal oder erstelle einen eigenen Raum.');
             };
-            // Server erreichbar: bis 12 s auf Lobby-Verbindung oder "kein Host" warten, sonst nächster Slot.
+            // Server erreichbar: bis 25 s auf Lobby-Verbindung oder "kein Host" warten, sonst nächster Slot.
             // Server gar nicht erreichbar -> nach 15 s Fehler.
             let timer = setTimeout(function check() {
-                if (probeOpen) timer = setTimeout(() => finish(nextSlot), 6000);
+                if (probeOpen) timer = setTimeout(() => finish(nextSlot), 19000);
                 else timer = setTimeout(() => finish(() => { try { probe.destroy(); } catch (e) {} backToLobby('Keine Verbindung zum Multiplayer-Server. Prüfe dein Internet/WLAN und öffne die index.html direkt im Browser (nicht in einer Vorschau-App).'); }), 9000);
             }, 6000);
 
             probe.on('open', () => {
                 probeOpen = true;
                 updateNetStatus('Suche Lobby...');
-                const conn = probe.connect(targetId, { reliable: true });
+                const conn = probe.connect(targetId, { reliable: true, serialization: 'json' });
                 conn.on('open', () => finish(() => { quickJoinTries = 0; initPeer(null, probe); setupConnection(conn); }));
-                setTimeout(() => { if (!done) updateNetStatus('Verbinde mit Lobby...'); }, 2500);
+                setTimeout(() => { if (!done) updateNetStatus('Verbinde mit Lobby...'); }, 7000);
             });
             probe.on('error', (err) => {
                 if (err.type === 'peer-unavailable') finish(becomeHost);
