@@ -11,6 +11,8 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <!-- PeerJS Library for WebRTC Data Sync -->
     <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+    <!-- MQTT: Zwischenserver (Relay), falls die direkte Verbindung zwischen Geräten nicht klappt -->
+    <script src="https://unpkg.com/mqtt@5.16.0/dist/mqtt.min.js"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
@@ -1720,6 +1722,123 @@ const LAYOUTS = {
             }
         });
 
+        // =====================================================================
+        //  ZWISCHENSERVER (Relay) über öffentliche MQTT-Broker (WebSocket, verschlüsselt)
+        //  Klappt die direkte WebRTC-Verbindung nicht innerhalb von 5 s (Router, Firewall, gleiches LAN ohne
+        //  Hairpinning ...), laufen die Spieldaten über diese Server. Es wird an ALLE Broker gesendet,
+        //  damit sich Geräte auch dann finden, wenn einer der Broker ausfällt.
+        // =====================================================================
+        const RELAY_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+        const RELAY_PREFIX = 'catto-arena-v1/';
+        const pendingConnects = new Set();
+        const relay = { clients: [], subs: new Set(), conns: {}, seen: new Set(), seenQ: [], seq: 0, started: false };
+        function relayStart() {
+            if (relay.started || typeof mqtt === 'undefined') return;
+            relay.started = true;
+            RELAY_BROKERS.forEach(url => {
+                let c;
+                try { c = mqtt.connect(url, { clientId: 'ca_' + Math.random().toString(36).slice(2, 12), keepalive: 30, reconnectPeriod: 3000, connectTimeout: 8000, clean: true }); }
+                catch (e) { return; }
+                c.on('connect', () => { relay.subs.forEach(t => c.subscribe(t)); });
+                c.on('message', (topic, payload) => relayOnMessage(payload));
+                c.on('error', () => {});
+                relay.clients.push(c);
+            });
+        }
+        function relayListen(id) {
+            relayStart();
+            const t = RELAY_PREFIX + id;
+            if (relay.subs.has(t)) return;
+            relay.subs.add(t);
+            relay.clients.forEach(c => { if (c.connected) c.subscribe(t); });
+        }
+        function relaySend(to, msg) {
+            msg.to = to; msg.s = ++relay.seq;
+            const txt = JSON.stringify(msg);
+            relay.clients.forEach(c => { if (c.connected) c.publish(RELAY_PREFIX + to, txt); });
+        }
+        function relayReset() {
+            Object.values(relay.conns).forEach(c => { try { c.close(); } catch (e) {} });
+            relay.conns = {};
+            relay.clients.forEach(c => relay.subs.forEach(t => { try { c.unsubscribe(t); } catch (e) {} }));
+            relay.subs.clear();
+        }
+        class RelayConn {
+            constructor(localId, remoteId) {
+                this.localId = localId; this.peer = remoteId; this.open = false; this.closed = false; this.relay = true;
+                this.h = {}; this.lastSeen = performance.now(); this.lastState = 0;
+                relay.conns[localId + '>' + remoteId] = this;
+            }
+            on(e, f) { (this.h[e] = this.h[e] || []).push(f); return this; }
+            emit(e, x) { (this.h[e] || []).slice().forEach(f => { try { f(x); } catch (err) { console.error(err); } }); }
+            _open() { if (this.open || this.closed) return; this.open = true; this.emit('open'); }
+            send(data) {
+                if (!this.open) return;
+                if (data && data.type === 'STATE') { // Positionen über den Zwischenserver mit 10 statt 20 Updates/s
+                    const n = performance.now(); if (n - this.lastState < 90) return; this.lastState = n;
+                }
+                relaySend(this.peer, { f: this.localId, t: 'd', d: data });
+            }
+            close() { if (this.closed) return; relaySend(this.peer, { f: this.localId, t: 'c' }); this._gone(); }
+            _gone() { if (this.closed) return; this.closed = true; this.open = false; delete relay.conns[this.localId + '>' + this.peer]; this.emit('close'); }
+        }
+        function relayOnMessage(payload) {
+            let m;
+            try { m = JSON.parse(typeof payload === 'string' ? payload : new TextDecoder().decode(payload)); } catch (e) { return; }
+            if (!m || !m.f || !m.to) return;
+            const key = m.f + ':' + m.s; // doppelte Nachrichten (mehrere Broker) verwerfen
+            if (relay.seen.has(key)) return;
+            relay.seen.add(key); relay.seenQ.push(key);
+            if (relay.seenQ.length > 3000) relay.seen.delete(relay.seenQ.shift());
+            let c = relay.conns[m.to + '>' + m.f];
+            if (m.t === 'h') { // jemand möchte sich über den Zwischenserver verbinden
+                if (!c || c.closed) {
+                    if (!peer || m.to !== myPeerId) return;
+                    const old = connections[m.f];
+                    if (old && !old.relay) { old._abandoned = true; delete connections[m.f]; try { old.close(); } catch (e) {} }
+                    c = new RelayConn(m.to, m.f);
+                    setupConnection(c);
+                    c._open();
+                }
+                c.lastSeen = performance.now();
+                relaySend(m.f, { f: m.to, t: 'a' });
+                return;
+            }
+            if (!c) return;
+            c.lastSeen = performance.now();
+            if (m.t === 'a') c._open();
+            else if (m.t === 'd') { c._open(); c.emit('data', m.d); }
+            else if (m.t === 'c') c._gone();
+        }
+        // Lebenszeichen + Erkennen, wenn jemand den Tab einfach schließt
+        setInterval(() => {
+            const now = performance.now();
+            Object.values(relay.conns).forEach(c => {
+                if (!c.open) return;
+                if (now - c.lastSeen > 15000) { c._gone(); return; }
+                relaySend(c.peer, { f: c.localId, t: 'p' });
+            });
+        }, 3000);
+        // Verbindet erst direkt (WebRTC). Klappt das nicht in 5 s -> Zwischenserver.
+        function connectWithFallback(localPeer, targetId, onConn) {
+            relayStart();
+            const wconn = localPeer.connect(targetId, { reliable: true, serialization: 'json' });
+            let settled = false;
+            wconn.on('open', () => { if (settled) return; settled = true; onConn(wconn); });
+            setTimeout(() => {
+                if (settled || localPeer.destroyed) return;
+                settled = true;
+                wconn._abandoned = true; try { wconn.close(); } catch (e) {}
+                relayListen(localPeer.id);
+                const rc = new RelayConn(localPeer.id, targetId);
+                rc.on('open', () => addKillFeed('Verbunden über Zwischenserver'));
+                const hello = () => { if (!rc.open && !rc.closed && !localPeer.destroyed) relaySend(targetId, { f: localPeer.id, t: 'h' }); };
+                hello();
+                const iv = setInterval(() => { if (rc.open || rc.closed || localPeer.destroyed) clearInterval(iv); else hello(); }, 1500);
+                onConn(rc);
+            }, 5000);
+        }
+
         let peerTries = 0;
         function initPeer(customRoomId = null, existingPeer = null, onOpen = null) {
             updateNetStatus("Verbinde mit Server..." + (peerTries ? ' (Versuch ' + (peerTries + 1) + ')' : ''));
@@ -1748,6 +1867,7 @@ const LAYOUTS = {
             const onPeerOpen = (id) => {
                 opened = true; peerTries = 0; if (openTimer) clearTimeout(openTimer);
                 myPeerId = id;
+                relayListen(id);
                 if (onOpen) onOpen(id);
                 updateNetStatus("Online | Raum: " + currentRoomCode);
                 
@@ -1805,7 +1925,7 @@ const LAYOUTS = {
                     backToLobby('Dieser Raum-Code ist schon vergeben. Wähle einen anderen Code oder tritt dem Raum bei.');
                     return;
                 }
-                if (err.type === 'peer-unavailable' && !isHost && Object.keys(connections).length === 0) {
+                if (err.type === 'peer-unavailable' && !isHost && Object.values(connections).every(c => !c.open)) {
                     backToLobby('Raum nicht gefunden. Prüfe den Code (der Host muss den Raum zuerst erstellen).');
                     return;
                 }
@@ -1826,6 +1946,7 @@ const LAYOUTS = {
         function backToLobby(msg) {
             for (const id in remotePlayers) { scene.remove(remotePlayers[id].mesh); delete remotePlayers[id]; }
             connections = {};
+            relayReset();
             if (peer) { try { peer.destroy(); } catch (e) {} }
             peer = null;
             myPeerId = null;
@@ -1879,6 +2000,7 @@ const LAYOUTS = {
             });
 
             conn.on('close', () => {
+                if (conn._abandoned) return;
                 if (remotePlayers[conn.peer]) {
                     scene.remove(remotePlayers[conn.peer].mesh);
                     delete remotePlayers[conn.peer];
@@ -2186,8 +2308,15 @@ const LAYOUTS = {
             else if (data.type === 'PEERS') {
                 if (peer && Array.isArray(data.ids)) {
                     data.ids.forEach(id => {
-                        if (id !== myPeerId && !connections[id]) {
-                            setupConnection(peer.connect(id, { reliable: true, serialization: 'json' }));
+                        if (id !== myPeerId && !connections[id] && !pendingConnects.has(id)) {
+                            pendingConnects.add(id);
+                            connectWithFallback(peer, id, (c) => {
+                                pendingConnects.delete(id);
+                                const ex = connections[id];
+                                if (ex && ex.open) { if (c !== ex) { c._abandoned = true; try { c.close(); } catch (e) {} } return; }
+                                if (ex) { ex._abandoned = true; delete connections[id]; try { ex.close(); } catch (e) {} }
+                                setupConnection(c);
+                            });
                         }
                     });
                 }
@@ -2902,11 +3031,10 @@ const LAYOUTS = {
             currentRoomCode = code;
             peerTries = 0;
             initPeer(null, null, () => {
-                const conn = peer.connect(ROOM_PREFIX + code, { reliable: true, serialization: 'json' });
-                setupConnection(conn);
                 updateNetStatus('Raum gefunden – verbinde...');
+                connectWithFallback(peer, ROOM_PREFIX + code, (c) => setupConnection(c));
                 setTimeout(() => {
-                    if (!conn.open && peer && !isHost && currentRoomCode === code && Object.keys(connections).every(k => !connections[k].open))
+                    if (peer && !isHost && currentRoomCode === code && Object.keys(connections).every(k => !connections[k].open))
                         backToLobby('Der Raum wurde gefunden, aber der Host antwortet nicht. Tipp: Der Host-Tab muss offen und sichtbar sein (nicht im Hintergrund-Tab) – teste mit zwei Fenstern nebeneinander oder zwei Geräten.');
                 }, 20000);
             });
@@ -2966,8 +3094,10 @@ const LAYOUTS = {
             probe.on('open', () => {
                 probeOpen = true;
                 updateNetStatus('Suche Lobby...');
-                const conn = probe.connect(targetId, { reliable: true, serialization: 'json' });
-                conn.on('open', () => finish(() => { quickJoinTries = 0; initPeer(null, probe); setupConnection(conn); }));
+                connectWithFallback(probe, targetId, (conn) => {
+                    const join = () => finish(() => { quickJoinTries = 0; initPeer(null, probe); setupConnection(conn); });
+                    if (conn.open) join(); else conn.on('open', join);
+                });
                 setTimeout(() => { if (!done) updateNetStatus('Verbinde mit Lobby...'); }, 7000);
             });
             probe.on('error', (err) => {
