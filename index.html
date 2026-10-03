@@ -1708,7 +1708,14 @@ const LAYOUTS = {
 
             const peerOptions = {
                 debug: 1,
-                config: { iceServers: getIceServers() }
+                config: {
+                    iceServers: [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' }
+                    ]
+                }
             };
 
             try {
@@ -2910,7 +2917,7 @@ const LAYOUTS = {
             addKillFeed('Suche offene Lobby...');
             let probe;
             try {
-                probe = new Peer({ debug: 0, config: { iceServers: getIceServers() } });
+                probe = new Peer({ debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] } });
             } catch (e) { backToLobby('Verbindung fehlgeschlagen.'); return; }
 
             let done = false;
