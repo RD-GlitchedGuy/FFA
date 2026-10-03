@@ -589,13 +589,20 @@
                 const url = SOUND_URLS[key];
                 if (!this.active) { this.active = []; this.broken = {}; }
                 if (!url || url === 'beispiel.mp3' || this.broken[key]) { if (fallback) fallback(); return; }
+                if (!this.pool) this.pool = {};
                 this.active = this.active.filter(a => !a.ended && !a.paused);
                 if (this.active.length >= MAX_SOUND_OVERLAP) { const old = this.active.shift(); old.pause(); }
-                const a = new Audio(url);
-                a.volume = 0.6;
-                a.onerror = () => { this.broken[key] = true; };
+                // Wiederverwenden statt jedes Mal neu laden (spart viel Leistung auf Tablets)
+                const pool = this.pool[key] || (this.pool[key] = []);
+                let a = pool.find(x => x.ended || x.paused);
+                if (!a) {
+                    if (pool.length >= MAX_SOUND_OVERLAP) { a = pool[0]; a.pause(); }
+                    else { a = new Audio(url); a.preload = 'auto'; a.volume = 0.6; a.onerror = () => { this.broken[key] = true; }; pool.push(a); }
+                }
+                try { a.currentTime = 0; } catch (e) {}
                 this.active.push(a);
-                a.play().catch(() => { if (fallback) fallback(); });
+                const pr = a.play();
+                if (pr && pr.catch) pr.catch(() => { if (fallback) fallback(); });
             }
             playShoot() { this.playFile(Math.random() < RARE_SHOT_CHANCE ? 'shootRare' : 'shoot', () => this.synthShoot()); }
             playHit()   { this.playFile('hit',   () => this.synthHit()); }
@@ -730,9 +737,26 @@
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 320);
         camera.rotation.order = 'YXZ';
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        // ----- Performance: schwache Geräte (Tablets/Handys) erkennen -----
+        const LOW_END = (window.matchMedia && matchMedia('(pointer: coarse)').matches) ||
+            /iPad|iPhone|Android|Mobile/i.test(navigator.userAgent) ||
+            (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) || // iPadOS
+            (navigator.hardwareConcurrency || 8) <= 4;
+        const renderer = new THREE.WebGLRenderer({ antialias: !LOW_END, powerPreference: "high-performance" });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+        // Dynamische Auflösung: sinken die FPS, wird intern etwas kleiner gerendert (Spiel bleibt gleich)
+        const PERF = { maxRatio: Math.min(window.devicePixelRatio || 1, LOW_END ? 1 : 1.5), minRatio: LOW_END ? 0.55 : 0.75, ratio: 1, frames: 0, acc: 0 };
+        PERF.ratio = PERF.maxRatio;
+        renderer.setPixelRatio(PERF.ratio);
+        function perfTick(dt) {
+            PERF.frames++; PERF.acc += dt;
+            if (PERF.acc < 2) return;
+            const fps = PERF.frames / PERF.acc; PERF.frames = 0; PERF.acc = 0;
+            let nr = PERF.ratio;
+            if (fps < 45) nr = Math.max(PERF.minRatio, PERF.ratio - 0.15);
+            else if (fps > 57) nr = Math.min(PERF.maxRatio, PERF.ratio + 0.1);
+            if (Math.abs(nr - PERF.ratio) > 0.01) { PERF.ratio = nr; renderer.setPixelRatio(nr); renderer.setSize(window.innerWidth, window.innerHeight); }
+        }
         renderer.shadowMap.enabled = false; // Shadow map disabled for lightweight non-laggy performance
         container.appendChild(renderer.domElement);
 
@@ -1000,7 +1024,7 @@ const LAYOUTS = {
             currentMap = id;
             powerups.slice().forEach(pu => removePowerup(pu.id));
             clearEnemies();
-            while (mazeGroup.children.length) { const o = mazeGroup.children.pop(); if (o.userData.disposeGeo) o.geometry.dispose(); }
+            while (mazeGroup.children.length) { const o = mazeGroup.children.pop(); if (o.userData.disposeGeo) o.geometry.dispose(); if (o.isInstancedMesh && o.dispose) o.dispose(); }
             decoGroup.children.slice().forEach(o => decoGroup.remove(o));
             extraWallMats.forEach(m => m.dispose()); extraWallMats = [];
             wallBoxes.length = 0; SPAWN_POINTS.length = 0; BOUNCE_PADS.length = 0;
@@ -1031,6 +1055,7 @@ const LAYOUTS = {
 
             // Wände (Bunte Welt: jede Box in anderer Farbe)
             const colored = {};
+            const wallInst = new Map(); // Material -> Positionen
             for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
                 if (MAZE_GRID[r][c] !== 1) continue;
                 const w = cellToWorld(r, c);
@@ -1040,11 +1065,19 @@ const LAYOUTS = {
                     if (!colored[hex]) { colored[hex] = wallMaterial.clone(); colored[hex].color.setHex(hex); extraWallMats.push(colored[hex]); }
                     mat = colored[hex];
                 }
-                const wall = new THREE.Mesh(wallGeo, mat);
-                wall.position.set(w.x, WALL_HEIGHT / 2, w.z);
-                mazeGroup.add(wall);
+                if (!wallInst.has(mat)) wallInst.set(mat, []);
+                wallInst.get(mat).push(w);
                 wallBoxes.push({ minX: w.x - TILE_SIZE / 2, maxX: w.x + TILE_SIZE / 2, minZ: w.z - TILE_SIZE / 2, maxZ: w.z + TILE_SIZE / 2 });
             }
+
+            const _m4 = new THREE.Matrix4();
+            wallInst.forEach((list, mat) => {
+                const im = new THREE.InstancedMesh(wallGeo, mat, list.length);
+                list.forEach((w, i) => { _m4.makeTranslation(w.x, WALL_HEIGHT / 2, w.z); im.setMatrixAt(i, _m4); });
+                im.instanceMatrix.needsUpdate = true;
+                im.frustumCulled = false;
+                mazeGroup.add(im);
+            });
 
             // Spawnpunkte (unsichtbar)
             const free = (r, c) => MAZE_GRID[r] && MAZE_GRID[r][c] === 0;
@@ -1320,9 +1353,12 @@ const LAYOUTS = {
             }
         }
 
+        let lastChatAt = 0;
         function sendChatMessage() {
-            const text = chatInput.value.trim();
+            const text = chatInput.value.trim().slice(0, 100);
+            if (text && performance.now() - lastChatAt < 1200) { addChatSystem('Nicht so schnell – kurz warten.'); closeChat(); return; }
             if (text) {
+                lastChatAt = performance.now();
                 addChatMessage(player.name, text, true);
                 broadcastData({
                     type: 'CHAT',
@@ -2275,7 +2311,14 @@ const LAYOUTS = {
             if (eB || eL3) tryDash();
         }
 
+        const rateLast = {};
+        function rateOk(key, ms) {
+            const n = performance.now();
+            if (rateLast[key] && n - rateLast[key] < ms) return false;
+            rateLast[key] = n; return true;
+        }
         function handleNetworkData(senderId, data) {
+            if (!data || typeof data !== 'object') return;
             if (data.type === 'STATE') {
                 let p = remotePlayers[senderId];
                 if (!p || p.skin !== data.skin || p.name !== data.name) {
@@ -2302,6 +2345,7 @@ const LAYOUTS = {
                 }
             }
             else if (data.type === 'SHOOT') {
+                if (!rateOk('s' + senderId, 200)) return;
                 createTracer(new THREE.Vector3().copy(data.origin), new THREE.Vector3().copy(data.target));
                 audio.playShoot();
             }
@@ -2325,7 +2369,7 @@ const LAYOUTS = {
                 if (!isHost && MAPS[data.id] && (data.id !== currentMap || data.announce)) applyMap(data.id, !!data.announce);
             }
             else if (data.type === 'EHIT') {
-                if (isHost) damageEnemy(data.id, data.dmg, data.atk);
+                if (isHost && rateOk('e' + senderId, 200)) damageEnemy(data.id, data.dmg, data.atk);
             }
             else if (data.type === 'ENS') {
                 if (!isHost && MAPS[currentMap].coop) syncEnemies(data);
@@ -2343,10 +2387,12 @@ const LAYOUTS = {
                 handleKill(data);
             }
             else if (data.type === 'CHAT') {
-                addChatMessage(data.name || 'Spieler', data.message);
+                if (!rateOk('c' + senderId, 800)) return;
+                addChatMessage(String(data.name || 'Spieler').slice(0, 16), String(data.message || '').slice(0, 120));
             }
             else if (data.type === 'HIT') {
                 if (data.targetId === myPeerId) {
+                    if (!rateOk('h' + senderId, 200)) return; // mehr Treffer/s als möglich = Spam/Cheat
                     if (performance.now() < player.protectUntil) return; // Spawnschutz
                     // Je mehr Schaden, desto weiter fliegst du (100 HP: x1 ... 25 HP: x2.5)
                     const kbMult = Math.min(2.5, 1 + (100 - Math.max(0, player.hp)) / 50);
@@ -2393,6 +2439,10 @@ const LAYOUTS = {
                 skin: player.skin,
                 prot: performance.now() < player.protectUntil
             };
+            const sig = packet.x.toFixed(2) + packet.y.toFixed(2) + packet.z.toFixed(2) + packet.yaw.toFixed(3) + packet.prot + packet.skin + packet.name;
+            const tS = performance.now();
+            if (sig === lastStateSig && tS - lastStateAt < 500) return; // nichts geändert -> Netzwerk sparen
+            lastStateSig = sig; lastStateAt = tS;
 
             for (let id in connections) {
                 if (connections[id].open) {
@@ -2400,8 +2450,13 @@ const LAYOUTS = {
                 }
             }
         }, 50);
+        let lastStateSig = '', lastStateAt = 0;
 
+        let lastShotAt = 0;
         function shootWeapon() {
+            const tNow = performance.now();
+            if (tNow - lastShotAt < 250) return; // Autoklicker/Spam-Schutz: gleiche Feuerrate wie Touch & Controller
+            lastShotAt = tNow;
             player.protectUntil = 0; // Schießen beendet den Spawnschutz
             afk.last = performance.now(); afk.warned = false;
             audio.init();
@@ -2483,17 +2538,16 @@ const LAYOUTS = {
             }
         }
 
+        const TRACER_MAT = new THREE.LineBasicMaterial({ color: 0x00f0ff, linewidth: 2 });
         function createTracer(from, to) {
             const points = [from, to];
             const geo = new THREE.BufferGeometry().setFromPoints(points);
-            const mat = new THREE.LineBasicMaterial({ color: 0x00f0ff, linewidth: 2 });
-            const line = new THREE.Line(geo, mat);
+            const line = new THREE.Line(geo, TRACER_MAT);
             scene.add(line);
 
             setTimeout(() => {
                 scene.remove(line);
                 geo.dispose();
-                mat.dispose();
             }, 80);
         }
 
@@ -2646,8 +2700,12 @@ const LAYOUTS = {
                 camera.updateProjectionMatrix();
             }
 
-            document.getElementById('pos-display').innerText = 
-                `X: ${player.pos.x.toFixed(1)} Y: ${player.pos.y.toFixed(1)} Z: ${player.pos.z.toFixed(1)}`;
+            const tP = performance.now();
+            if (tP - (window._posAt || 0) > 200) {
+                window._posAt = tP;
+                document.getElementById('pos-display').textContent =
+                    `X: ${player.pos.x.toFixed(1)} Y: ${player.pos.y.toFixed(1)} Z: ${player.pos.z.toFixed(1)}`;
+            }
         }
 
         function respawnPlayer(killerName = null, msg = null) {
@@ -2690,6 +2748,7 @@ const LAYOUTS = {
             const now = performance.now();
             const dt = Math.min((now - lastTime) / 1000, 0.1);
             lastTime = now;
+            perfTick(dt);
 
             autoPadMode();
             pollMenuPad(dt);
